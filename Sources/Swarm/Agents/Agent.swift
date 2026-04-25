@@ -967,7 +967,16 @@ public struct Agent: AgentRuntime, Sendable {
     }
 
     private static func makeDefaultMemory() throws -> any Memory {
-        try DefaultAgentMemory()
+        if SwarmRuntimeEnvironment.isRunningTests {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("SwarmDefaultMemoryTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            return try DefaultAgentMemory(configuration: DefaultAgentMemory.Configuration(
+                waxStoreURL: root.appendingPathComponent("wax-memory.mv2s")
+            ))
+        }
+        return try DefaultAgentMemory()
     }
 
     private func resolvedToolRegistry() async throws -> ToolRegistry {
@@ -1124,17 +1133,18 @@ public struct Agent: AgentRuntime, Sendable {
         if let mem = activeMemory {
             let contextProfile = configuration.effectiveContextProfile
             let tokenLimit = contextProfile.memoryTokenLimit
-            if let policyAwareMemory = mem as? any MemoryRetrievalPolicyAware {
-                memoryContext = await policyAwareMemory.context(
-                    for: MemoryQuery(
-                        text: input,
-                        tokenLimit: tokenLimit,
-                        maxItems: contextProfile.maxRetrievedItems,
-                        maxItemTokens: contextProfile.maxRetrievedItemTokens
+            memoryContext = try await executeWithinRemainingTimeout(startTime: startTime) {
+                if let policyAwareMemory = mem as? any MemoryRetrievalPolicyAware {
+                    return await policyAwareMemory.context(
+                        for: MemoryQuery(
+                            text: input,
+                            tokenLimit: tokenLimit,
+                            maxItems: contextProfile.maxRetrievedItems,
+                            maxItemTokens: contextProfile.maxRetrievedItemTokens
+                        )
                     )
-                )
-            } else {
-                memoryContext = await mem.context(for: input, tokenLimit: tokenLimit)
+                }
+                return await mem.context(for: input, tokenLimit: tokenLimit)
             }
         }
 
@@ -1270,9 +1280,16 @@ public struct Agent: AgentRuntime, Sendable {
                     }
                     return schemas
                 }()
-                let structuredMessages = prompt == rawPrompt
-                    ? conversationHistory.map(\.inferenceMessage)
-                    : nil
+                let providerAcceptsStructuredMessages = provider is any ConversationInferenceProvider
+                let structuredMessages: [InferenceMessage]? = if configuration.effectiveContextProfile.preset == .strict4k {
+                    nil
+                } else if providerAcceptsStructuredMessages {
+                    conversationHistory.map(\.inferenceMessage)
+                } else if prompt == rawPrompt {
+                    conversationHistory.map(\.inferenceMessage)
+                } else {
+                    nil
+                }
 
                 // If no tools defined, generate without tool calling
                 if toolSchemas.isEmpty {

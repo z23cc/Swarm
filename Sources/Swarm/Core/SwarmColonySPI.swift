@@ -40,6 +40,7 @@ import Foundation
     public let id: String
     public let role: SwarmChatRole
     public let content: String
+    public let reasoningContent: String?
     public let name: String?
     public let toolCallID: String?
     public let toolCalls: [SwarmToolCall]
@@ -49,6 +50,7 @@ import Foundation
         id: String,
         role: SwarmChatRole,
         content: String,
+        reasoningContent: String? = nil,
         name: String? = nil,
         toolCallID: String? = nil,
         toolCalls: [SwarmToolCall] = [],
@@ -57,6 +59,7 @@ import Foundation
         self.id = id
         self.role = role
         self.content = content
+        self.reasoningContent = reasoningContent
         self.name = name
         self.toolCallID = toolCallID
         self.toolCalls = toolCalls
@@ -228,6 +231,7 @@ import Foundation
 
 @_spi(ColonyInternal) public enum SwarmRuntimeError: Error, Sendable, Equatable {
     case modelClientMissing
+    case toolRegistryMissing
     case modelStreamInvalid(String)
     case invalidMessagesUpdate
     case resumeInterruptMismatch(expected: String, found: String)

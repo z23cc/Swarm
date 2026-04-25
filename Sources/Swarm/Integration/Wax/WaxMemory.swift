@@ -253,7 +253,7 @@ public extension WaxMemory {
 
     static func makeDefaultStoreURL() -> URL {
         let fileManager = FileManager.default
-        let isRunningTests = isRunningUnderTests()
+        let isRunningTests = SwarmRuntimeEnvironment.isRunningTests
         let baseURL = isRunningTests
             ? fileManager.temporaryDirectory
             : (fileManager.urls(
@@ -271,30 +271,5 @@ public extension WaxMemory {
         try? fileManager.createDirectory(at: root, withIntermediateDirectories: true)
         let fileName = isRunningTests ? "wax-memory-\(UUID().uuidString).mv2s" : "wax-memory.mv2s"
         return root.appendingPathComponent(fileName)
-    }
-
-    private static func isRunningUnderTests() -> Bool {
-        let processInfo = ProcessInfo.processInfo
-        let environment = processInfo.environment
-        if environment["XCTestConfigurationFilePath"] != nil ||
-            environment["XCTestSessionIdentifier"] != nil
-        {
-            return true
-        }
-
-        let arguments = processInfo.arguments.joined(separator: " ").lowercased()
-        if arguments.contains("xctest") ||
-            arguments.contains("swiftpm-testing-helper") ||
-            arguments.contains("swift-testing")
-        {
-            return true
-        }
-
-        let bundlePath = Bundle.main.bundlePath.lowercased()
-        if bundlePath.hasSuffix(".xctest") || bundlePath.contains("swiftpm-testing-helper") {
-            return true
-        }
-
-        return NSClassFromString("XCTestCase") != nil
     }
 }

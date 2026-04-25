@@ -47,7 +47,7 @@ var packageDependencies: [Package.Dependency] = [
     ),
     .package(url: "https://github.com/christopherkarani/ContextCore.git", exact: "1.0.0"),
     .package(url: "https://github.com/christopherkarani/Membrane", exact: "0.1.3"),
-    .package(url: "https://github.com/christopherkarani/Hive", exact: "0.1.9"),
+    .package(url: "https://github.com/christopherkarani/Hive", exact: "0.2.0"),
 ]
 
 var swarmDependencies: [Target.Dependency] = [

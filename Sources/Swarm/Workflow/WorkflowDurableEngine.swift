@@ -132,9 +132,6 @@ struct WorkflowDurableEngine: Sendable {
             context: context,
             clock: WorkflowDurableClock(),
             logger: WorkflowDurableLogger(),
-            model: nil,
-            modelRouter: nil,
-            tools: nil,
             checkpointStore: checkpointing.runtimeStore
         )
 
@@ -147,9 +144,13 @@ struct WorkflowDurableEngine: Sendable {
             }
         }
 
+        let input: WorkflowDurableInput = resume ? .resume : .start(
+            input: startInput,
+            signature: workflow.workflowSignature
+        )
         let handle = await runtime.run(
             threadID: threadID,
-            input: resume ? .resume : .start(input: startInput, signature: workflow.workflowSignature),
+            input: input,
             options: runOptions(for: policy)
         )
 
@@ -188,7 +189,7 @@ struct WorkflowDurableEngine: Sendable {
             maxSteps: maxStepBudget(),
             maxConcurrentTasks: 1,
             checkpointPolicy: checkpointPolicy,
-            deterministicTokenStreaming: true
+            deterministicStreamBuffering: true
         )
     }
 

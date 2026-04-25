@@ -125,6 +125,10 @@ struct GraphAgent: AgentRuntime, Sendable {
 
             await observer?.onAgentEnd(context: nil, agent: self, result: result)
             return result
+        } catch let error as SwarmRuntimeError {
+            let agentError = mapSwarmRuntimeError(error)
+            await observer?.onError(context: nil, agent: self, error: agentError)
+            throw agentError
         } catch let error as HiveRuntimeError {
             let agentError = mapHiveError(error)
             await observer?.onError(context: nil, agent: self, error: agentError)
@@ -205,7 +209,9 @@ struct GraphAgent: AgentRuntime, Sendable {
                         guard await finishGate.markFinished() else { return }
 
                         let mapped: AgentError
-                        if let hiveError = error as? HiveRuntimeError {
+                        if let swarmError = error as? SwarmRuntimeError {
+                            mapped = mapSwarmRuntimeError(swarmError)
+                        } else if let hiveError = error as? HiveRuntimeError {
                             mapped = mapHiveError(hiveError)
                         } else {
                             mapped = AgentError.internalError(reason: "Hive event stream failed: \(error.localizedDescription)")
@@ -235,6 +241,12 @@ struct GraphAgent: AgentRuntime, Sendable {
                 continuation.yield(.lifecycle(.completed(result: result)))
                 _ = await finishGate.markFinished()
                 continuation.finish()
+            } catch let error as SwarmRuntimeError {
+                guard await finishGate.markFinished() else { return }
+                let agentError = mapSwarmRuntimeError(error)
+                await observer?.onError(context: nil, agent: self, error: agentError)
+                continuation.yield(.lifecycle(.failed(error: agentError)))
+                continuation.finish(throwing: agentError)
             } catch let error as HiveRuntimeError {
                 guard await finishGate.markFinished() else { return }
                 let agentError = mapHiveError(error)
@@ -277,29 +289,6 @@ struct GraphAgent: AgentRuntime, Sendable {
         case .runCancelled:
             return .lifecycle(.cancelled)
 
-        case .modelInvocationStarted(let model):
-            return .observation(.llmStarted(model: model, promptTokens: nil))
-
-        case .modelToken(let text):
-            return .output(.token(text))
-
-        case .modelInvocationFinished:
-            return .observation(.llmCompleted(model: nil, promptTokens: nil, completionTokens: nil, duration: 0))
-
-        case .toolInvocationStarted(let name):
-            let call = toolCall(from: event, toolName: name)
-            return .tool(.started(call: call))
-
-        case .toolInvocationFinished(let name, let success):
-            let call = toolCall(from: event, toolName: name)
-            if success {
-                let result = ToolResult(callId: call.id, isSuccess: true, output: .null, duration: .zero)
-                return .tool(.completed(call: call, result: result))
-            } else {
-                let error = AgentError.toolExecutionFailed(toolName: name, underlyingError: "Tool invocation failed")
-                return .tool(.failed(call: call, error: error))
-            }
-
         case .stepStarted(let stepIndex, _):
             return .lifecycle(.iterationStarted(number: stepIndex + 1))
 
@@ -324,6 +313,35 @@ struct GraphAgent: AgentRuntime, Sendable {
                 options: [payloadHash]
             ))
 
+        case .customDebug(let name):
+            return mapCustomDebugEvent(name: name, event: event)
+
+        default:
+            return nil
+        }
+    }
+
+    private static func mapCustomDebugEvent(name: String, event: HiveEvent) -> AgentEvent? {
+        switch name {
+        case "modelInvocationStarted":
+            return .observation(.llmStarted(model: event.metadata["model"], promptTokens: nil))
+        case "modelToken":
+            return .output(.token(event.metadata["text"] ?? ""))
+        case "modelInvocationFinished":
+            return .observation(.llmCompleted(model: nil, promptTokens: nil, completionTokens: nil, duration: 0))
+        case "toolInvocationStarted":
+            let toolName = event.metadata["name"] ?? "tool"
+            let call = toolCall(from: event, toolName: toolName)
+            return .tool(.started(call: call))
+        case "toolInvocationFinished":
+            let toolName = event.metadata["name"] ?? "tool"
+            let call = toolCall(from: event, toolName: toolName)
+            if event.metadata["success"] == "true" {
+                let result = ToolResult(callId: call.id, isSuccess: true, output: .null, duration: .zero)
+                return .tool(.completed(call: call, result: result))
+            }
+            let error = AgentError.toolExecutionFailed(toolName: toolName, underlyingError: "Tool invocation failed")
+            return .tool(.failed(call: call, error: error))
         default:
             return nil
         }
@@ -502,10 +520,6 @@ struct GraphAgent: AgentRuntime, Sendable {
                 reason: "Hive task-local fingerprint invalid length (expected \(expected), got \(actual))."
             )
 
-        case .modelClientMissing:
-            return .inferenceProviderUnavailable(reason: "Hive model client is not configured.")
-        case .toolRegistryMissing:
-            return .internalError(reason: "Hive tool registry is not configured.")
         case .checkpointStoreMissing:
             return .internalError(reason: "Hive checkpoint store required for tool approval policy.")
         case let .checkpointOverrideNotCheckpointed(channelID):
@@ -604,18 +618,29 @@ struct GraphAgent: AgentRuntime, Sendable {
             )
         case .taskLocalWriteNotAllowed:
             return .invalidInput(reason: "Hive task-local writes are not allowed for this operation.")
-        case let .modelStreamInvalid(reason):
-            return .generationFailed(reason: "Hive model stream error: \(reason)")
-        case .invalidMessagesUpdate:
-            return .internalError(reason: "Hive messages channel received invalid update.")
         case let .missingTaskLocalValue(channelID):
             return .internalError(reason: "Hive missing task-local value for channel '\(channelID.rawValue)'.")
-        case let .modelToolLoopMaxModelInvocationsExceeded(maxModelInvocations):
-            return .maxIterationsExceeded(iterations: maxModelInvocations)
         case let .internalInvariantViolation(reason):
             return .internalError(reason: "Hive internal invariant violation: \(reason)")
         @unknown default:
             return .internalError(reason: "Unknown Hive runtime error: \(error)")
+        }
+    }
+
+    private func mapSwarmRuntimeError(_ error: SwarmRuntimeError) -> AgentError {
+        switch error {
+        case .modelClientMissing:
+            return .inferenceProviderUnavailable(reason: "Hive model client is not configured.")
+        case .toolRegistryMissing:
+            return .internalError(reason: "Hive tool registry is not configured.")
+        case let .modelStreamInvalid(reason):
+            return .generationFailed(reason: "Hive model stream error: \(reason)")
+        case .invalidMessagesUpdate:
+            return .internalError(reason: "Hive messages channel received invalid update.")
+        case let .resumeInterruptMismatch(expected, found):
+            return .invalidInput(reason: "Hive resume interrupt mismatch. expected=\(expected), found=\(found)")
+        case .noInterruptToResume:
+            return .invalidInput(reason: "Hive resume requested with no pending interrupt.")
         }
     }
 }
