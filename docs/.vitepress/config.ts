@@ -53,6 +53,7 @@ export default defineConfig({
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Capability Showcase', link: '/guide/capability-showcase' },
             { text: 'Agent Workspace', link: '/guide/agent-workspace' },
+            { text: 'OpenTelemetry Tracing', link: '/guide/opentelemetry-tracing' },
             { text: 'Why Swarm', link: '/guide/why-swarm' },
           ]
         },

@@ -33,7 +33,7 @@ The **[Complete API Reference](/swarm-complete-reference)** is an archival deep 
 | [Streaming](/streaming) | `AgentEvent` streaming, SwiftUI integration |
 | [Guardrails](/guardrails) | Input/output validation, tripwires |
 | [Resilience](/resilience) | Retry, circuit breakers, fallback, timeouts |
-| [Observability](/observability) | Tracing, `OSLogTracer`, `SwiftLogTracer`, metrics |
+| [Observability](/guide/opentelemetry-tracing) | Tracing, OpenTelemetry, `OSLogTracer`, `SwiftLogTracer`, metrics |
 | [MCP](/mcp) | Model Context Protocol client and server |
 | [Providers](/providers) | Inference providers, `MultiProvider` routing |
 | [Durable Runtime Hardening](/durable-runtime-hardening) | Internal implementation note covering run control, checkpoint capability, and deterministic transcript/state hashing |

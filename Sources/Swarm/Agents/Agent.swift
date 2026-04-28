@@ -907,29 +907,29 @@ public struct Agent: AgentRuntime, Sendable {
     private func resolvedInferenceProvider(toolRegistry: ToolRegistry) async throws -> any InferenceProvider {
         // 1. Explicit provider on Agent
         if let inferenceProvider {
-            return inferenceProvider
+            return transformedInferenceProvider(inferenceProvider)
         }
 
         // 2. TaskLocal via .environment()
         if let environmentProvider = AgentEnvironmentValues.current.inferenceProvider {
-            return environmentProvider
+            return transformedInferenceProvider(environmentProvider)
         }
 
         // 3. Swarm.defaultProvider (global)
         if let globalProvider = await Swarm.defaultProvider {
-            return globalProvider
+            return transformedInferenceProvider(globalProvider)
         }
 
         // 4. Swarm.cloudProvider (if tool calling is required)
         let hasEnabledTools = await !toolRegistry.schemas.isEmpty
         let needsToolCallingProvider = hasEnabledTools || !_handoffs.isEmpty
         if needsToolCallingProvider, let cloudProvider = await Swarm.cloudProvider {
-            return cloudProvider
+            return transformedInferenceProvider(cloudProvider)
         }
 
         // 5. Foundation Models (if available, on Apple platform)
         if let foundationModelsProvider = DefaultInferenceProviderFactory.makeFoundationModelsProviderIfAvailable() {
-            return foundationModelsProvider
+            return transformedInferenceProvider(foundationModelsProvider)
         }
 
         // 6. No provider available
@@ -941,6 +941,13 @@ public struct Agent: AgentRuntime, Sendable {
             or pass one explicitly to Agent(...).
             """
         )
+    }
+
+    private func transformedInferenceProvider(_ provider: any InferenceProvider) -> any InferenceProvider {
+        guard let transform = AgentEnvironmentValues.current.inferenceProviderTransform else {
+            return provider
+        }
+        return transform(provider)
     }
 
     private func resolvedMembraneAdapter() -> (any MembraneAgentAdapter)? {

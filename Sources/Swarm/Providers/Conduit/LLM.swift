@@ -279,6 +279,68 @@ public struct LLM: Sendable, InferenceProvider {
     }
 }
 
+extension LLM: InferenceProviderMetadata {
+    public var providerName: String? {
+        switch kind {
+        case .openAI:
+            "openai"
+        case .anthropic:
+            "anthropic"
+        case .openRouter:
+            "openrouter"
+        case .minimax:
+            "minimax"
+        case .ollama:
+            "ollama"
+#if canImport(MLX)
+        case .mlx:
+            "mlx"
+#endif
+        }
+    }
+
+    public var modelName: String? {
+        switch kind {
+        case let .openAI(config):
+            config.model
+        case let .anthropic(config):
+            config.model
+        case let .openRouter(config):
+            config.model
+        case let .minimax(config):
+            config.model
+        case let .ollama(config):
+            config.model
+#if canImport(MLX)
+        case let .mlx(config):
+            switch config {
+            case let .mlx(model):
+                model
+            case let .mlxLocal(path):
+                path
+            }
+#endif
+        }
+    }
+
+    public var endpointURL: URL? {
+        switch kind {
+        case .openAI:
+            URL(string: "https://api.openai.com/v1")
+        case .anthropic:
+            URL(string: "https://api.anthropic.com")
+        case .openRouter, .minimax:
+            URL(string: "https://openrouter.ai/api/v1")
+        case let .ollama(config):
+            URL(string: "http://\(config.settings.host):\(config.settings.port)")
+#if canImport(MLX)
+        case .mlx:
+            nil
+#endif
+        }
+    }
+}
+
 #if DEBUG
 extension LLM {
     // Test hook: keep Conduit types out of the public API, but allow the package's

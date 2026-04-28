@@ -6,6 +6,7 @@ let includeDemo = ProcessInfo.processInfo.environment["SWARM_INCLUDE_DEMO"] == "
 
 var packageProducts: [Product] = [
     .library(name: "Swarm", targets: ["Swarm"]),
+    .library(name: "SwarmOpenTelemetry", targets: ["SwarmOpenTelemetry"]),
     .library(name: "SwarmMembrane", targets: ["SwarmMembrane"]),
     .library(name: "SwarmMCP", targets: ["SwarmMCP"]),
 ]
@@ -32,6 +33,7 @@ var packageDependencies: [Package.Dependency] = [
     .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"603.0.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.10.1"),
     .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
+    .package(url: "https://github.com/open-telemetry/opentelemetry-swift-core.git", from: "2.3.0"),
     .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.13.2"),
     // Production graph must resolve to the published tag set that is known to build together.
     .package(url: "https://github.com/christopherkarani/Wax.git", exact: "0.1.19"),
@@ -88,6 +90,14 @@ var packageTargets: [Target] = [
     .target(
         name: "Swarm",
         dependencies: swarmDependencies,
+        swiftSettings: swarmSwiftSettings
+    ),
+    .target(
+        name: "SwarmOpenTelemetry",
+        dependencies: [
+            "Swarm",
+            .product(name: "OpenTelemetryApi", package: "opentelemetry-swift-core"),
+        ],
         swiftSettings: swarmSwiftSettings
     ),
     .target(
@@ -170,6 +180,15 @@ var packageTargets: [Target] = [
         swiftSettings: [
             .enableExperimentalFeature("StrictConcurrency")
         ]
+    ),
+    .testTarget(
+        name: "SwarmOpenTelemetryTests",
+        dependencies: [
+            "Swarm",
+            "SwarmOpenTelemetry",
+            .product(name: "OpenTelemetrySdk", package: "opentelemetry-swift-core"),
+        ],
+        swiftSettings: swarmSwiftSettings
     )
 ]
 

@@ -32,7 +32,11 @@ public enum ConduitProviderSelection: Sendable, InferenceProvider {
     public static func anthropic(apiKey: String, model: String) -> ConduitProviderSelection {
         let provider = AnthropicProvider(apiKey: apiKey)
         let modelID = anthropicModelID(model)
-        let bridge = ConduitInferenceProvider(provider: provider, model: modelID)
+        let bridge = ConduitInferenceProvider(
+            provider: provider,
+            model: modelID,
+            metadata: .init(providerName: "anthropic", modelName: model, endpointURL: URL(string: "https://api.anthropic.com"))
+        )
         return .provider(bridge)
     }
 
@@ -40,7 +44,11 @@ public enum ConduitProviderSelection: Sendable, InferenceProvider {
     public static func openAI(apiKey: String, model: String) -> ConduitProviderSelection {
         let provider = OpenAIProvider(apiKey: apiKey)
         let modelID = openAIModelID(model)
-        let bridge = ConduitInferenceProvider(provider: provider, model: modelID)
+        let bridge = ConduitInferenceProvider(
+            provider: provider,
+            model: modelID,
+            metadata: .init(providerName: "openai", modelName: model, endpointURL: URL(string: "https://api.openai.com/v1"))
+        )
         return .provider(bridge)
     }
 
@@ -52,7 +60,8 @@ public enum ConduitProviderSelection: Sendable, InferenceProvider {
         let bridge = ConduitInferenceProvider(
             provider: provider,
             model: .foundationModels,
-            supportsStreamingToolCalls: false
+            supportsStreamingToolCalls: false,
+            metadata: .init(providerName: "foundationmodels", modelName: "foundationModels")
         )
         return .provider(bridge)
     }
@@ -169,7 +178,11 @@ public enum ConduitProviderSelection: Sendable, InferenceProvider {
         #if CONDUIT_TRAIT_MINIMAX
             let provider = MiniMaxProvider(apiKey: apiKey)
             let modelID: MiniMaxProvider.ModelID = .init(model)
-            let bridge = ConduitInferenceProvider(provider: provider, model: modelID)
+            let bridge = ConduitInferenceProvider(
+                provider: provider,
+                model: modelID,
+                metadata: .init(providerName: "minimax", modelName: model)
+            )
             return .provider(bridge)
         #else
             let routedModel = model.hasPrefix("minimax/") ? model : "minimax/\(model)"
@@ -197,7 +210,8 @@ public enum ConduitProviderSelection: Sendable, InferenceProvider {
         let bridge = ConduitInferenceProvider(
             provider: provider,
             model: .foundationModels,
-            supportsStreamingToolCalls: false
+            supportsStreamingToolCalls: false,
+            metadata: .init(providerName: "foundationmodels", modelName: "foundationModels")
         )
         return .provider(bridge)
     }
@@ -240,7 +254,11 @@ public enum ConduitProviderSelection: Sendable, InferenceProvider {
             OpenAIProvider(openRouterKey: apiKey)
         }
         let modelID = openAIModelID(model)
-        let bridge = ConduitInferenceProvider(provider: provider, model: modelID)
+        let bridge = ConduitInferenceProvider(
+            provider: provider,
+            model: modelID,
+            metadata: .init(providerName: "openrouter", modelName: model, endpointURL: URL(string: "https://openrouter.ai/api/v1"))
+        )
         return .provider(bridge)
     }
 
@@ -254,7 +272,15 @@ public enum ConduitProviderSelection: Sendable, InferenceProvider {
             ollamaConfig: settings.toConduit()
         )
         let modelID = openAIModelID(model)
-        let bridge = ConduitInferenceProvider(provider: provider, model: modelID)
+        let bridge = ConduitInferenceProvider(
+            provider: provider,
+            model: modelID,
+            metadata: .init(
+                providerName: "ollama",
+                modelName: model,
+                endpointURL: URL(string: "http://\(settings.host):\(settings.port)")
+            )
+        )
         return .provider(bridge)
     }
 
@@ -274,6 +300,20 @@ extension ConduitProviderSelection: CapabilityReportingInferenceProvider {
         var capabilities = InferenceProviderCapabilities.resolved(for: makeProvider())
         capabilities.insert(.conversationMessages)
         return capabilities
+    }
+}
+
+extension ConduitProviderSelection: InferenceProviderMetadata {
+    public var providerName: String? {
+        (makeProvider() as? any InferenceProviderMetadata)?.providerName
+    }
+
+    public var modelName: String? {
+        (makeProvider() as? any InferenceProviderMetadata)?.modelName
+    }
+
+    public var endpointURL: URL? {
+        (makeProvider() as? any InferenceProviderMetadata)?.endpointURL
     }
 }
 

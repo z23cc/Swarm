@@ -14,6 +14,7 @@ import Foundation
 /// Environment values are propagated using `TaskLocal` via `AgentEnvironmentValues.current`.
 public struct AgentEnvironment: Sendable {
     public var inferenceProvider: (any InferenceProvider)?
+    public var inferenceProviderTransform: (@Sendable (any InferenceProvider) -> any InferenceProvider)?
     public var tracer: (any Tracer)?
     public var memory: (any Memory)?
     public var promptTokenCounter: any PromptTokenCounter
@@ -22,6 +23,7 @@ public struct AgentEnvironment: Sendable {
 
     public init(
         inferenceProvider: (any InferenceProvider)? = nil,
+        inferenceProviderTransform: (@Sendable (any InferenceProvider) -> any InferenceProvider)? = nil,
         tracer: (any Tracer)? = nil,
         memory: (any Memory)? = nil,
         promptTokenCounter: any PromptTokenCounter = EstimatedPromptTokenCounter.shared,
@@ -29,6 +31,7 @@ public struct AgentEnvironment: Sendable {
         webSearch: WebSearchTool.Configuration? = nil
     ) {
         self.inferenceProvider = inferenceProvider
+        self.inferenceProviderTransform = inferenceProviderTransform
         self.tracer = tracer
         self.memory = memory
         self.promptTokenCounter = promptTokenCounter
