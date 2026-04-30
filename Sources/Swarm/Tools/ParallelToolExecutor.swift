@@ -130,7 +130,14 @@ public actor ParallelToolExecutor {
             return []
         }
 
-        // 1. Validate all tools exist BEFORE starting any execution
+        // 1. Validate all tools exist BEFORE starting any execution.
+        // This is a fast-fail optimization: if any tool is missing or disabled at the
+        // start of the batch, throw before launching N tasks. ToolRegistry.execute()
+        // re-validates per call inside the task group below, so a tool that gets
+        // disabled *after* this pre-pass surfaces as a `ToolExecutionResult.failure`
+        // for that single call rather than a fast-throw — consistent with how the
+        // parallel error strategies (`.failFast`, `.collectErrors`, `.continueOnError`)
+        // expect to handle per-tool failures.
         for call in calls {
             guard let tool = await registry.tool(named: call.toolName), tool.isEnabled else {
                 throw AgentError.toolNotFound(name: call.toolName)

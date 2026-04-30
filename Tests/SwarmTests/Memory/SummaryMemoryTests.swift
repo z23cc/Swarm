@@ -200,6 +200,41 @@ struct SummaryMemoryTests {
         #expect(await memory.count == 5)
     }
 
+    @Test("Does not start overlapping summarizations while a summarizer is suspended")
+    func serializesSuspendedSummarization() async throws {
+        let summarizer = BlockingEchoSummarizer()
+        let config = SummaryMemory.Configuration(
+            recentMessageCount: 5,
+            summarizationThreshold: 15
+        )
+        let memory = SummaryMemory(configuration: config, summarizer: summarizer)
+
+        let firstBatch = Task {
+            for index in 1...15 {
+                await memory.add(.user("Message \(index)"))
+            }
+        }
+        await summarizer.waitForCallCount(1)
+
+        let secondBatch = Task {
+            for index in 16...25 {
+                await memory.add(.user("Message \(index)"))
+            }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(await summarizer.callCount == 1)
+
+        await summarizer.releaseAll()
+        await firstBatch.value
+        await secondBatch.value
+
+        let context = await memory.context(for: "history", tokenLimit: 10_000)
+        #expect(context.contains("Message 1"))
+        #expect(context.contains("Message 20"))
+        #expect(context.contains("Message 25"))
+    }
+
     // MARK: - Context Retrieval Tests
 
     @Test("Context includes summary when present")
@@ -319,5 +354,59 @@ struct SummaryMemoryTests {
         #expect(diagnostics.totalMessagesProcessed == 15)
         #expect(diagnostics.hasSummary == true)
         #expect(diagnostics.summarizationCount >= 1)
+    }
+}
+
+private actor BlockingEchoSummarizer: Summarizer {
+    private(set) var calls: [(text: String, maxTokens: Int)] = []
+    private var callWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var released = false
+
+    var isAvailable: Bool { true }
+
+    var callCount: Int { calls.count }
+
+    func summarize(_ text: String, maxTokens: Int) async throws -> String {
+        calls.append((text, maxTokens))
+        resumeCallWaiters()
+
+        if !released {
+            await withCheckedContinuation { continuation in
+                releaseWaiters.append(continuation)
+            }
+        }
+
+        return text
+    }
+
+    func waitForCallCount(_ target: Int) async {
+        if calls.count >= target {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            callWaiters.append((target, continuation))
+        }
+    }
+
+    func releaseAll() {
+        released = true
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    private func resumeCallWaiters() {
+        var remaining: [(Int, CheckedContinuation<Void, Never>)] = []
+        for waiter in callWaiters {
+            if calls.count >= waiter.0 {
+                waiter.1.resume()
+            } else {
+                remaining.append(waiter)
+            }
+        }
+        callWaiters = remaining
     }
 }

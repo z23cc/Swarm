@@ -18,12 +18,13 @@ import Foundation
 /// Agent throws `AgentError.inferenceProviderUnavailable`.
 ///
 /// Provider resolution order is:
-/// 1. An explicit provider passed to `Agent(...)` (including `Agent(_:)`)
-/// 2. A provider set via `.environment(\.inferenceProvider, ...)`
-/// 3. `Swarm.defaultProvider` (set via `Swarm.configure(provider:)`)
-/// 4. `Swarm.cloudProvider` (set via `Swarm.configure(cloudProvider:)`, when tool calling is required)
-/// 5. Apple Foundation Models (on-device), if available, including prompt-based tool emulation
-/// 6. Otherwise, throw `AgentError.inferenceProviderUnavailable`
+/// 1. Apple Foundation Models when `inferencePolicy.privacyRequired` is true
+/// 2. An explicit provider passed to `Agent(...)` (including `Agent(_:)`)
+/// 3. A provider set via `.environment(\.inferenceProvider, ...)`
+/// 4. `Swarm.defaultProvider` (set via `Swarm.configure(provider:)`)
+/// 5. `Swarm.cloudProvider` (set via `Swarm.configure(cloudProvider:)`, when tool calling is required)
+/// 6. Apple Foundation Models (on-device), if available, including prompt-based tool emulation
+/// 7. Otherwise, throw `AgentError.inferenceProviderUnavailable`
 ///
 /// The agent follows a loop-based execution pattern:
 /// 1. Build prompt with system instructions + conversation history
@@ -127,12 +128,13 @@ public struct Agent: AgentRuntime, Sendable {
     /// The inference provider determines which LLM backend the agent uses for generating
     /// responses. If not set, the agent follows a resolution order to find a provider:
     ///
-    /// 1. Explicit provider passed to ``Agent`` initialization
-    /// 2. Provider set via `.environment(\.inferenceProvider, ...)`
-    /// 3. ``Swarm/defaultProvider`` (configured via `Swarm.configure(provider:)`)
-    /// 4. ``Swarm/cloudProvider`` (configured via `Swarm.configure(cloudProvider:)`)
-    /// 5. Apple Foundation Models (on-device), if available
-    /// 6. Throws ``AgentError/inferenceProviderUnavailable``
+    /// 1. Apple Foundation Models when `configuration.inferencePolicy.privacyRequired` is true
+    /// 2. Explicit provider passed to ``Agent`` initialization
+    /// 3. Provider set via `.environment(\.inferenceProvider, ...)`
+    /// 4. ``Swarm/defaultProvider`` (configured via `Swarm.configure(provider:)`)
+    /// 5. ``Swarm/cloudProvider`` (configured via `Swarm.configure(cloudProvider:)`)
+    /// 6. Apple Foundation Models (on-device), if available
+    /// 7. Throws ``AgentError/inferenceProviderUnavailable``
     ///
     /// ## Usage
     /// Set a specific provider when you want this agent to use a different LLM than
@@ -188,11 +190,11 @@ public struct Agent: AgentRuntime, Sendable {
     /// The configuration for the guardrail runner.
     ///
     /// This configuration controls how input and output guardrails are executed,
-    /// including timeout settings and error handling behavior.
+    /// including sequential or parallel execution and error handling behavior.
     ///
     /// ## Default Behavior
     /// If not specified, uses ``GuardrailRunnerConfiguration/default`` which runs
-    /// guardrails with a 30-second timeout and stops on the first failure.
+    /// guardrails sequentially and stops on the first failure.
     ///
     /// See ``GuardrailRunnerConfiguration`` for customization options.
     public private(set) var guardrailRunnerConfiguration: GuardrailRunnerConfiguration
@@ -237,6 +239,7 @@ public struct Agent: AgentRuntime, Sendable {
     ///   - guardrailRunnerConfiguration: Configuration for guardrail runner. Default: .default
     ///   - handoffs: Handoff configurations for multi-agent orchestration. Default: []
     /// - Throws: `ToolRegistryError.duplicateToolName` if duplicate tool names are provided.
+    @_disfavoredOverload
     public init(
         tools: [any AnyJSONTool] = [],
         instructions: String = "",
@@ -361,6 +364,7 @@ public struct Agent: AgentRuntime, Sendable {
     ///   - guardrailRunnerConfiguration: Configuration for guardrail runner. Default: .default
     ///   - handoffAgents: Agents to hand off to, automatically wrapped as handoff configurations.
     /// - Throws: `ToolRegistryError.duplicateToolName` if duplicate tool names are provided.
+    @_disfavoredOverload
     public init(
         tools: [any AnyJSONTool] = [],
         instructions: String = "",
@@ -528,7 +532,7 @@ public struct Agent: AgentRuntime, Sendable {
     /// - Returns: An async stream of agent events.
     public func stream(_ input: String, session: (any Session)? = nil, observer: (any AgentObserver)? = nil) -> AsyncThrowingStream<AgentEvent, Error> {
         let agent = self
-        return StreamHelper.makeTrackedStream { continuation in
+        return StreamHelper.makeTrackedStream(bufferingPolicy: .unbounded) { continuation in
             // Create event bridge observer
             let streamObserver = EventStreamObserver(continuation: continuation)
 
@@ -665,20 +669,20 @@ public struct Agent: AgentRuntime, Sendable {
 
         func install(continuation: CheckedContinuation<T, Error>) {
             lock.lock()
+            defer { lock.unlock() }
             self.continuation = continuation
-            lock.unlock()
         }
 
         func setOperationTask(_ task: Task<Void, Never>) {
             lock.lock()
+            defer { lock.unlock() }
             operationTask = task
-            lock.unlock()
         }
 
         func setTimeoutTask(_ task: Task<Void, Never>) {
             lock.lock()
+            defer { lock.unlock() }
             timeoutTask = task
-            lock.unlock()
         }
 
         func finish(returning value: T) {
@@ -733,12 +737,39 @@ public struct Agent: AgentRuntime, Sendable {
 
     private actor DefaultMemorySessionTracker {
         private var sessionIDs: [ObjectIdentifier: String] = [:]
+        private var activeSessionIDs: [ObjectIdentifier: String] = [:]
+        private var activeCounts: [ObjectIdentifier: Int] = [:]
+        private var waiters: [ObjectIdentifier: [CheckedContinuation<Void, Never>]] = [:]
 
-        func didSwitchSession(for memory: AnyObject, sessionID: String) -> Bool {
-            let key = ObjectIdentifier(memory)
+        func beginRun(for key: ObjectIdentifier, sessionID: String) async -> Bool {
+            while let activeSessionID = activeSessionIDs[key],
+                  activeSessionID != sessionID
+            {
+                await withCheckedContinuation { continuation in
+                    waiters[key, default: []].append(continuation)
+                }
+            }
+
             let previous = sessionIDs[key]
             sessionIDs[key] = sessionID
+            activeSessionIDs[key] = sessionID
+            activeCounts[key, default: 0] += 1
             return previous != sessionID
+        }
+
+        func endRun(for key: ObjectIdentifier) {
+            let remaining = (activeCounts[key] ?? 1) - 1
+            if remaining > 0 {
+                activeCounts[key] = remaining
+                return
+            }
+
+            activeCounts[key] = nil
+            activeSessionIDs[key] = nil
+            let pendingWaiters = waiters.removeValue(forKey: key) ?? []
+            for waiter in pendingWaiters {
+                waiter.resume()
+            }
         }
     }
 
@@ -757,6 +788,7 @@ public struct Agent: AgentRuntime, Sendable {
             ?? (configuration.defaultTracingEnabled ? SwiftLogTracer(minimumLevel: .debug) : nil)
         let activeMemory = resolvedMemory()
         let lifecycleMemory = activeMemory as? any MemorySessionLifecycle
+        var defaultMemoryRunKey: ObjectIdentifier?
 
         if let session,
            let activeMemory,
@@ -764,10 +796,12 @@ public struct Agent: AgentRuntime, Sendable {
         {
             let activeMemoryObject = activeMemory as AnyObject
             let defaultMemoryObject = defaultMemory as AnyObject
-            if activeMemoryObject === defaultMemoryObject,
-               await Self.defaultMemorySessionTracker.didSwitchSession(for: activeMemoryObject, sessionID: session.sessionId)
-            {
-                await activeMemory.clear()
+            if activeMemoryObject === defaultMemoryObject {
+                let memoryKey = ObjectIdentifier(activeMemoryObject)
+                defaultMemoryRunKey = memoryKey
+                if await Self.defaultMemorySessionTracker.beginRun(for: memoryKey, sessionID: session.sessionId) {
+                    await activeMemory.clear()
+                }
             }
         }
 
@@ -889,6 +923,9 @@ public struct Agent: AgentRuntime, Sendable {
             if let lifecycleMemory {
                 await lifecycleMemory.endMemorySession()
             }
+            if let defaultMemoryRunKey {
+                await Self.defaultMemorySessionTracker.endRun(for: defaultMemoryRunKey)
+            }
             return InternalRunResult(agentResult: result, structuredOutput: toolLoopOutcome.structuredOutput)
         } catch {
             let normalizedError = normalizeCancellation(error)
@@ -898,6 +935,9 @@ public struct Agent: AgentRuntime, Sendable {
             if let lifecycleMemory {
                 await lifecycleMemory.endMemorySession()
             }
+            if let defaultMemoryRunKey {
+                await Self.defaultMemorySessionTracker.endRun(for: defaultMemoryRunKey)
+            }
             throw normalizedError
         }
     }
@@ -905,6 +945,10 @@ public struct Agent: AgentRuntime, Sendable {
     // MARK: - Inference Provider Resolution
 
     private func resolvedInferenceProvider(toolRegistry: ToolRegistry) async throws -> any InferenceProvider {
+        if configuration.inferencePolicy?.privacyRequired == true {
+            return try await resolvedPrivateInferenceProvider()
+        }
+
         // 1. Explicit provider on Agent
         if let inferenceProvider {
             return inferenceProvider
@@ -941,6 +985,47 @@ public struct Agent: AgentRuntime, Sendable {
             or pass one explicitly to Agent(...).
             """
         )
+    }
+
+    private func resolvedPrivateInferenceProvider() async throws -> any InferenceProvider {
+        if let foundationModelsProvider = DefaultInferenceProviderFactory.makeFoundationModelsProviderIfAvailable() {
+            return foundationModelsProvider
+        }
+
+        if let provider = privateInferenceProvider(inferenceProvider) {
+            return provider
+        }
+
+        if let provider = privateInferenceProvider(AgentEnvironmentValues.current.inferenceProvider) {
+            return provider
+        }
+
+        if let globalProvider = await Swarm.defaultProvider,
+           let provider = privateInferenceProvider(globalProvider)
+        {
+            return provider
+        }
+
+        throw AgentError.inferenceProviderUnavailable(
+            reason: """
+            AgentConfiguration.inferencePolicy.privacyRequired is true, but no private inference provider is available.
+
+            Use Apple Foundation Models on a supported device, or configure a provider that reports \
+            InferenceProviderCapabilities.privateInference.
+            """
+        )
+    }
+
+    private func privateInferenceProvider(_ provider: (any InferenceProvider)?) -> (any InferenceProvider)? {
+        guard let provider else {
+            return nil
+        }
+
+        let capabilities = InferenceProviderCapabilities.resolved(for: provider)
+        guard capabilities.contains(.privateInference) else {
+            return nil
+        }
+        return provider
     }
 
     private func resolvedMembraneAdapter() -> (any MembraneAgentAdapter)? {
@@ -2163,6 +2248,7 @@ public extension Agent {
         /// - Parameter tools: The tools to use.
         /// - Returns: A new builder with the tools set.
         @discardableResult
+        @available(*, deprecated, message: "Use tools(_:) with typed Tool values or Agent.withTools(@ToolBuilder:) for canonical typed tools.")
         public func tools(_ tools: [any AnyJSONTool]) -> Builder {
             var copy = self
             copy._tools = tools
@@ -2183,6 +2269,7 @@ public extension Agent {
         /// - Parameter tool: The tool to add.
         /// - Returns: A new builder with the tool added.
         @discardableResult
+        @available(*, deprecated, message: "Use addTool(_:) with a typed Tool, or wrap raw tools in a clearly marked advanced adapter.")
         public func addTool(_ tool: some AnyJSONTool) -> Builder {
             var copy = self
             copy._tools.append(tool)
@@ -2193,6 +2280,7 @@ public extension Agent {
         /// - Parameter tool: The tool to add.
         /// - Returns: A new builder with the tool added.
         @discardableResult
+        @available(*, deprecated, message: "Use addTool(_:) with a typed Tool, or wrap raw tools in a clearly marked advanced adapter.")
         public func addTool(_ tool: any AnyJSONTool) -> Builder {
             var copy = self
             copy._tools.append(tool)
@@ -2608,21 +2696,21 @@ public extension Agent {
 
     /// Replaces the tool set with the given array of `any Tool`.
     @discardableResult
-    func withTools(_ tools: [any Tool]) -> Agent {
+    func withTools(_ tools: [any Tool]) throws -> Agent {
         var copy = self
         let bridged = tools.map { bridgeToolToAnyJSON($0) }
+        copy.toolRegistry = try ToolRegistry(tools: bridged)
         copy.tools = bridged
-        copy.toolRegistry = (try? ToolRegistry(tools: bridged)) ?? ToolRegistry()
         return copy
     }
 
     /// Replaces the tool set using a `@ToolBuilder` closure.
     @discardableResult
-    func withTools(@ToolBuilder _ builder: () -> ToolCollection) -> Agent {
+    func withTools(@ToolBuilder _ builder: () -> ToolCollection) throws -> Agent {
         var copy = self
         let storage = builder().storage
+        copy.toolRegistry = try ToolRegistry(tools: storage)
         copy.tools = storage
-        copy.toolRegistry = (try? ToolRegistry(tools: storage)) ?? ToolRegistry()
         return copy
     }
 

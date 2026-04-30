@@ -277,6 +277,19 @@ public struct LLM: Sendable, InferenceProvider {
             ollamaConfig: settings.toConduit()
         )
     }
+
+    private var usesPrivateInference: Bool {
+        switch kind {
+        case .ollama:
+            true
+#if canImport(MLX)
+        case .mlx:
+            true
+#endif
+        default:
+            false
+        }
+    }
 }
 
 #if DEBUG
@@ -309,6 +322,9 @@ extension LLM: CapabilityReportingInferenceProvider {
     public var capabilities: InferenceProviderCapabilities {
         var capabilities = InferenceProviderCapabilities.resolved(for: makeProvider())
         capabilities.insert(.conversationMessages)
+        if usesPrivateInference {
+            capabilities.insert(.privateInference)
+        }
         return capabilities
     }
 }

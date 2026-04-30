@@ -12,7 +12,6 @@ var packageProducts: [Product] = [
 
 if includeDemo {
     packageProducts.append(.executable(name: "SwarmDemo", targets: ["SwarmDemo"]))
-    packageProducts.append(.executable(name: "ContextBenchmark", targets: ["ContextBenchmark"]))
     packageProducts.append(.executable(name: "SwarmMCPServerDemo", targets: ["SwarmMCPServerDemo"]))
 }
 
@@ -155,6 +154,7 @@ var packageTargets: [Target] = [
     .testTarget(
         name: "SwarmMacrosTests",
         dependencies: [
+            "Swarm",
             "SwarmMacros",
             .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax")
         ],
@@ -177,16 +177,6 @@ if includeDemo {
     packageTargets.append(
         .executableTarget(
             name: "SwarmDemo",
-            dependencies: ["Swarm"],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ]
-        )
-    )
-
-    packageTargets.append(
-        .executableTarget(
-            name: "ContextBenchmark",
             dependencies: ["Swarm"],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")

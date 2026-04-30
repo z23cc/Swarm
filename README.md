@@ -28,7 +28,7 @@ Two agents, one pipeline, compiled to a DAG with crash recovery and Swift concur
 ## Install
 
 ```swift
-.package(url: "https://github.com/christopherkarani/Swarm.git", from: "0.5.0")
+.package(url: "https://github.com/christopherkarani/Swarm.git", from: "0.5.1")
 ```
 
 
@@ -75,9 +75,11 @@ let workspace = try AgentWorkspace.appDefault()
 let agent = try Agent.onDevice(
     "You are a concise local assistant.",
     workspace: workspace,
-    inferenceProvider: .foundationModels
+    inferenceProvider: .foundationModels()
 )
 ```
+
+> **Note**: `.foundationModels()` requires an Apple platform (macOS 26+ / iOS 26+ / tvOS 26+). On Linux, swap it for `.ollama("llama3.2")`, `.anthropic(key: "...")`, or any other provider — the rest of the framework is portable.
 
 Markdown-first setup:
 
@@ -87,7 +89,7 @@ let workspace = try AgentWorkspace.appDefault()
 let agent = try Agent.spec(
     "support",
     in: workspace,
-    inferenceProvider: .foundationModels
+    inferenceProvider: .foundationModels()
 )
 ```
 
@@ -117,7 +119,7 @@ Use `try await workspace.validate()` in development or CI to catch malformed spe
 - **Swift concurrency is part of the surface.** Swift 6.2 `StrictConcurrency` is enabled across the package.
 - **Tools stay type-safe.** The `@Tool` macro generates JSON schemas from Swift structs.
 - **Workflows can survive crashes.** Durable workflow checkpointing lets you resume from an explicit checkpoint ID.
-- **Cloud and on-device models use the same abstractions.** Foundation Models, Anthropic, OpenAI, Ollama, Gemini, OpenRouter, and MLX all fit the same shape.
+- **Cloud and on-device models use the same abstractions.** Foundation Models, Anthropic, OpenAI, Ollama, Gemini, MiniMax, OpenRouter, and MLX all fit the same shape.
 - **It is written in Swift all the way down.** `AsyncThrowingStream`, actors, result builders, and macros are first-class here.
 
 ## Examples
@@ -168,6 +170,8 @@ let result = try await Workflow()
     .run("Latest advances in on-device ML")
 ```
 
+Each agent resolves its own provider. Pass `inferenceProvider:` per agent (as above), or call `Swarm.configure(provider: .anthropic(key: "..."))` once at app startup to share a default across every agent that doesn't specify one.
+
 ### Parallel fan-out
 
 ```swift
@@ -197,7 +201,8 @@ for try await event in agent.stream("Summarize the changelog.") {
     case .output(.token(let t)):           print(t, terminator: "")
     case .tool(.completed(let call, _)):   print("\n[tool: \(call.toolName)]")
     case .lifecycle(.completed(let r)):     print("\nDone in \(r.duration)")
-    default: break
+    case .lifecycle(.failed(let error)):    print("\nError: \(error)")
+    default: break // Other events: .thinking, .handoff, .observation, .iterationStarted, etc. See AgentEvent in docs/reference/api-catalog.md.
     }
 }
 ```
@@ -210,7 +215,7 @@ for try await event in agent.stream("Summarize the changelog.") {
 ```swift
 let agent = try Agent("You remember past conversations.",
     inferenceProvider: .anthropic(key: "sk-..."),
-    memory: .vector(embeddingProvider: myEmbedder, threshold: 0.75)) {
+    memory: .vector(embeddingProvider: myEmbedder, similarityThreshold: 0.75)) {
     // tools
 }
 ```
@@ -219,8 +224,8 @@ let agent = try Agent("You remember past conversations.",
 
 ```swift
 let agent = try Agent("You are a helpful assistant.",
-    inputGuardrails: [GuardrailSpec.maxInput(5000), GuardrailSpec.inputNotEmpty],
-    outputGuardrails: [GuardrailSpec.maxOutput(2000)])
+    inputGuardrails: [InputGuard.maxLength(5000), InputGuard.notEmpty()],
+    outputGuardrails: [OutputGuard.maxLength(2000)])
 ```
 
 #### Closure tools
@@ -253,7 +258,7 @@ let resumed = try await workflow.durable.execute("watch", resumeFrom: "monitor-v
 
 ```swift
 // On-device, private, no API key needed
-let local = try Agent("Be helpful.", inferenceProvider: .foundationModels)
+let local = try Agent("Be helpful.", inferenceProvider: .foundationModels())
 
 // Cloud
 let cloud = try Agent("Be helpful.", inferenceProvider: .anthropic(key: k))
@@ -297,13 +302,13 @@ for message in await conversation.messages {
 | **Agents** | `Agent` struct with `@ToolBuilder` trailing closure, `AgentRuntime` protocol |
 | **Workflows** | `Workflow`: `.step()`, `.parallel()`, `.route()`, `.repeatUntil()`, `.timeout()` |
 | **Tools** | `@Tool` macro, `FunctionTool`, `@ToolBuilder`, parallel execution |
-| **Memory** | `MemoryOption.conversation(limit:)`, `MemoryOption.vector(embeddingProvider:)`, `MemoryOption.slidingWindow(count:)`, `MemoryOption.summary(summarizer:)` |
-| **Guardrails** | `GuardrailSpec.maxInput()`, `GuardrailSpec.maxOutput()`, `GuardrailSpec.inputNotEmpty`, `GuardrailSpec.outputNotEmpty`, `GuardrailSpec.customInput()`, `GuardrailSpec.customOutput()` |
+| **Memory** | `Memory.conversation(maxMessages:)`, `Memory.vector(embeddingProvider:similarityThreshold:maxResults:)`, `Memory.slidingWindow(maxTokens:)`, `Memory.summary(configuration:summarizer:)`, `Memory.hybrid(configuration:summarizer:)` |
+| **Guardrails** | `InputGuard.maxLength()`, `InputGuard.notEmpty()`, `InputGuard.custom()`, `OutputGuard.maxLength()`, `OutputGuard.custom()` |
 | **Conversation** | `Conversation` actor for stateful multi-turn dialogue |
 | **Resilience** | 7 backoff strategies, circuit breaker, fallback chains, rate limiting |
 | **Observability** | `AgentObserver`, `Tracer`, `SwiftLogTracer`, per-agent token metrics |
 | **MCP** | Model Context Protocol client and server support |
-| **Providers** | Foundation Models, Anthropic, OpenAI, Ollama, Gemini, OpenRouter, MLX via [Conduit](https://github.com/christopherkarani/Conduit) |
+| **Providers** | Foundation Models, Anthropic, OpenAI, Ollama, Gemini, MiniMax, OpenRouter, MLX via [Conduit](https://github.com/christopherkarani/Conduit) |
 | **Macros** | `@Tool`, `@Parameter`, `@Traceable`, `#Prompt` |
 
 ## Architecture
@@ -316,17 +321,17 @@ for message in await conversation.messages {
 │     Workflow  ·  Conversation  ·  .run()  ·  .stream()      │
 ├─────────────────────────────────────────────────────────────┤
 │  Agents              Memory              Tools              │
-│  Agent (struct)      MemoryOption        @Tool macro        │
+│  Agent (struct)      Memory factories    @Tool macro        │
 │  AgentRuntime        Conversation        FunctionTool       │
 │                      (dot-syntax)        @ToolBuilder       │
 ├─────────────────────────────────────────────────────────────┤
-│  GuardrailSpec  ·  Resilience  ·  Observability  ·  MCP    │
+│  InputGuard · OutputGuard · Resilience · Observability · MCP│
 ├─────────────────────────────────────────────────────────────┤
 │              Durable Graph Runtime (internal)               │
 │   Compiled DAG  ·  Checkpointing  ·  Deterministic retry   │
 ├─────────────────────────────────────────────────────────────┤
 │              InferenceProvider (pluggable)                   │
-│   Foundation Models · Anthropic · OpenAI · Ollama · MLX     │
+│ Foundation Models · Anthropic · OpenAI · Ollama · OpenRouter│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -355,7 +360,7 @@ Foundation Models require iOS 26 / macOS 26. Cloud providers work on any Swift 6
 
 1. Fork → branch → `swift test` → PR
 2. All public types must be `Sendable`; the compiler enforces it
-3. Format with `swift package plugin --allow-writing-to-package-directory swiftformat`
+3. Format with `swiftformat Sources Tests --lint --config .swiftformat`
 
 Bug reports and feature requests: [GitHub Issues](https://github.com/christopherkarani/Swarm/issues)
 

@@ -36,7 +36,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: ${{ runner.os }}-swift-6.2-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-swift-6.2-${{ hashFiles('Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-swift-6.2-
 
@@ -54,6 +54,13 @@ jobs:
 
       - name: Assert requireHive fail-closed contract
         run: SWARM_HIVE_RUNTIME=1 SWARM_INCLUDE_HIVE=1 swift test --no-parallel --filter orchestrationRequireHiveFailClosed
+
+      - name: Run capability showcase matrix
+        run: swift run SwarmCapabilityShowcase matrix
+
+      - name: Test CodeReviewer example
+        run: swift test
+        working-directory: Examples/CodeReviewer
 
   # Linux Build & Test (core features, no SwiftData)
   build-linux:
@@ -77,7 +84,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: linux-swift-${{ hashFiles('Package.resolved') }}
+          key: linux-swift-${{ hashFiles('Package.swift') }}
           restore-keys: |
             linux-swift-
 
@@ -103,10 +110,10 @@ jobs:
         run: brew install swiftlint
 
       - name: Run SwiftLint
-        run: swiftlint lint --strict
+        run: swiftlint lint --strict --config .swiftlint.yml Sources Tests
 
       - name: Install SwiftFormat
         run: brew install swiftformat
 
       - name: Run SwiftFormat (check mode)
-        run: swiftformat --lint .
+        run: swiftformat Sources Tests --lint --config .swiftformat

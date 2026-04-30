@@ -299,3 +299,60 @@ struct CompositeTracerTests {
         #expect(tracedEvents[0].level == .info)
     }
 }
+
+@Suite("TracingHelper Redaction Tests")
+struct TracingHelperRedactionTests {
+    @Test("traceDecision redacts decision and option content by default")
+    func traceDecisionRedactsContentByDefault() async throws {
+        let tracer = SpyTracer()
+        let helper = TracingHelper(tracer: tracer, agentName: "Agent")
+
+        await helper.traceDecision("Use customer SSN 123-45-6789", options: ["email alice@example.com"])
+
+        let events = await tracer.tracedEvents
+        let event = try #require(events.first)
+        #expect(event.kind == .decision)
+        #expect(event.message == "Decision recorded")
+        #expect(event.metadata["decision"] == nil)
+        #expect(event.metadata["options"] == nil)
+        #expect(event.metadata["decision_length"]?.intValue == "Use customer SSN 123-45-6789".count)
+        #expect(event.metadata["options_count"]?.intValue == 1)
+        #expect(event.metadata["decision_redacted"]?.boolValue == true)
+    }
+
+    @Test("traceDecision can explicitly include sensitive content")
+    func traceDecisionCanIncludeSensitiveContent() async throws {
+        let tracer = SpyTracer()
+        let helper = TracingHelper(tracer: tracer, agentName: "Agent", recordsSensitiveContent: true)
+
+        await helper.traceDecision("Use customer SSN 123-45-6789", options: ["email alice@example.com"])
+
+        let events = await tracer.tracedEvents
+        let event = try #require(events.first)
+        #expect(event.message == "Decision: Use customer SSN 123-45-6789")
+        #expect(event.metadata["decision"]?.stringValue == "Use customer SSN 123-45-6789")
+        #expect(event.metadata["options"]?.arrayValue?.first?.stringValue == "email alice@example.com")
+        #expect(event.metadata["decision_redacted"]?.boolValue == false)
+    }
+
+    @Test("traceCustom redacts message and metadata by default")
+    func traceCustomRedactsMessageAndMetadataByDefault() async throws {
+        let tracer = SpyTracer()
+        let helper = TracingHelper(tracer: tracer, agentName: "Agent")
+
+        await helper.traceCustom(
+            kind: .custom,
+            message: "User token sk-live-secret",
+            metadata: ["token": .string("sk-live-secret"), "count": .int(2)]
+        )
+
+        let events = await tracer.tracedEvents
+        let event = try #require(events.first)
+        #expect(event.message == "Custom event recorded")
+        #expect(event.metadata["token"] == nil)
+        #expect(event.metadata["count"] == nil)
+        #expect(event.metadata["metadata_keys"]?.arrayValue?.map(\.stringValue).compactMap { $0 }.sorted() == ["count", "token"])
+        #expect(event.metadata["message_length"]?.intValue == "User token sk-live-secret".count)
+        #expect(event.metadata["metadata_redacted"]?.boolValue == true)
+    }
+}

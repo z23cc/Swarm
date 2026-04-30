@@ -22,9 +22,9 @@ struct V2SurfaceAuditTests {
 
     // MARK: - Version
 
-    @Test("Swarm.version is 0.5.2")
+    @Test("Swarm.version is 0.5.1")
     func versionIsV2() {
-        #expect(Swarm.version == "0.5.2")
+        #expect(Swarm.version == "0.5.1")
     }
 
     // MARK: - TokenUsage (module-level, not nested)

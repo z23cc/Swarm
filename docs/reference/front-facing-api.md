@@ -124,7 +124,7 @@ try Agent(
     outputGuardrails: [any OutputGuardrail] = [],
     guardrailRunnerConfiguration: GuardrailRunnerConfiguration = .default,
     handoffs: [AnyHandoffConfiguration] = [],
-    @ToolBuilder tools: () -> [any AnyJSONTool] = { [] }
+    @ToolBuilder tools: () -> ToolCollection = { .empty }
 )
 ```
 
@@ -143,7 +143,7 @@ let agent = try Agent("You are a helpful assistant.") {
 let agent = try Agent(
     "You are a helpful assistant.",
     configuration: .init(name: "Assistant"),
-    memory: .conversation(limit: 50),
+    memory: .conversation(maxMessages: 50),
     inferenceProvider: .anthropic(key: "sk-..."),
     inputGuardrails: [MaxInputLengthGuardrail(maxLength: 5000)],
     handoffs: [AnyHandoffConfiguration(targetAgent: supportAgent)]
@@ -166,7 +166,7 @@ let agent = try Agent(
 | `outputGuardrails` | `[any OutputGuardrail]` | `[]` | Output validation guardrails |
 | `guardrailRunnerConfiguration` | `GuardrailRunnerConfiguration` | `.default` | Guardrail runner settings |
 | `handoffs` | `[AnyHandoffConfiguration]` | `[]` | Handoff targets for multi-agent orchestration |
-| `tools` | `@ToolBuilder () -> [any AnyJSONTool]` | `{ [] }` | Trailing closure producing the agent's tools |
+| `tools` | `@ToolBuilder () -> ToolCollection` | `{ .empty }` | Trailing closure producing the agent's tools |
 
 ### Runtime modifiers (on AgentRuntime)
 
@@ -213,6 +213,8 @@ Agent("instructions") {
     greet
 }
 ```
+
+The builder produces an opaque `ToolCollection`; callers supply concrete `Tool` values or `[any Tool]`, and Swarm handles the internal type erasure.
 
 ## 6) Conversation
 
@@ -289,23 +291,20 @@ WorkflowCheckpointing.inMemory()
 WorkflowCheckpointing.fileSystem(directory: URL)
 ```
 
-## 8) GuardrailSpec
+## 8) InputGuard and OutputGuard
 
-Concrete guardrail descriptors with static factories. Used as init parameters on `Agent`.
+Concrete guardrails with static factories. Used as init parameters on `Agent`.
 
 ```swift
-public struct GuardrailSpec: Sendable {
-    // Input guardrails
-    public static func maxInput(_ length: Int) -> GuardrailSpec
-    public static var inputNotEmpty: GuardrailSpec
+public struct InputGuard: InputGuardrail, Sendable {
+    public static func maxLength(_ maxLength: Int, name: String = "MaxLengthGuardrail") -> InputGuard
+    public static func notEmpty(name: String = "NotEmptyGuardrail") -> InputGuard
+    public static func custom(_ name: String, _ validate: @escaping @Sendable (String) async throws -> GuardrailResult) -> InputGuard
+}
 
-    // Output guardrails
-    public static func maxOutput(_ length: Int) -> GuardrailSpec
-    public static var outputNotEmpty: GuardrailSpec
-
-    // Custom guardrails
-    public static func customInput(_ name: String, _ validate: @escaping @Sendable (String) async throws -> GuardrailResult) -> GuardrailSpec
-    public static func customOutput(_ name: String, _ validate: @escaping @Sendable (String) async throws -> GuardrailResult) -> GuardrailSpec
+public struct OutputGuard: OutputGuardrail, Sendable {
+    public static func maxLength(_ maxLength: Int, name: String = "MaxOutputLengthGuardrail") -> OutputGuard
+    public static func custom(_ name: String, _ validate: @escaping @Sendable (String) async throws -> GuardrailResult) -> OutputGuard
 }
 ```
 
@@ -313,40 +312,28 @@ public struct GuardrailSpec: Sendable {
 
 ```swift
 public protocol InputGuardrail: Sendable {
-    func validate(input: String) async throws -> GuardrailResult
+    func validate(_ input: String, context: AgentContext?) async throws -> GuardrailResult
 }
 
 public protocol OutputGuardrail: Sendable {
-    func validate(output: String) async throws -> GuardrailResult
+    func validate(_ output: String, agent: any AgentRuntime, context: AgentContext?) async throws -> GuardrailResult
 }
 ```
 
-## 9) RunOptions
-
-```swift
-public struct RunOptions: Sendable {
-    public var maxIterations: Int
-    public var parallelToolCalls: Bool
-    public var modelSettings: ModelSettings?
-
-    public static let `default`: RunOptions
-}
-```
-
-## 10) MemoryOption
+## 9) Memory factories
 
 Dot-syntax memory factories used with the `memory` init parameter.
 
 ```swift
-public struct MemoryOption {
-    public static func conversation(limit: Int = 100) -> MemoryOption
-    public static func vector(embeddingProvider: some EmbeddingProvider, threshold: Double = 0.75) -> MemoryOption
-    public static func slidingWindow(count: Int) -> MemoryOption
-    public static func summary(summarizer: some Summarizer) -> MemoryOption
-}
+Memory.conversation(maxMessages: 100)
+Memory.slidingWindow(maxTokens: 4000)
+Memory.summary(configuration: .default, summarizer: TruncatingSummarizer.shared)
+Memory.hybrid(configuration: .default, summarizer: TruncatingSummarizer.shared)
+Memory.persistent(backend: InMemoryBackend(), conversationId: UUID().uuidString, maxMessages: 0)
+Memory.vector(embeddingProvider: embedder, similarityThreshold: 0.7, maxResults: 10)
 ```
 
-## 11) HandoffTool
+## 10) HandoffTool
 
 Agents passed via the `handoffs` or `handoffAgents` init parameters are automatically wrapped as tool calls. The LLM can invoke them to delegate control.
 
@@ -363,23 +350,35 @@ let triage = try Agent(
 )
 ```
 
-## 12) Inference providers
+## 11) Inference providers
 
 ```swift
 public protocol InferenceProvider: Sendable {
-    func generate(
-        messages: [InferenceMessage],
+    func generate(prompt: String, options: InferenceOptions) async throws -> String
+
+    func stream(
+        prompt: String,
+        options: InferenceOptions
+    ) -> AsyncThrowingStream<String, Error>
+
+    func generateWithToolCalls(
+        prompt: String,
         tools: [ToolSchema],
         options: InferenceOptions
     ) async throws -> InferenceResponse
 }
 
-public protocol InferenceStreamingProvider: InferenceProvider {
-    func stream(
+public protocol ConversationInferenceProvider: InferenceProvider {
+    func generate(
+        messages: [InferenceMessage],
+        options: InferenceOptions
+    ) async throws -> String
+
+    func generateWithToolCalls(
         messages: [InferenceMessage],
         tools: [ToolSchema],
         options: InferenceOptions
-    ) -> AsyncThrowingStream<InferenceStreamEvent, Error>
+    ) async throws -> InferenceResponse
 }
 ```
 
@@ -389,24 +388,42 @@ public protocol InferenceStreamingProvider: InferenceProvider {
 .anthropic(key: "sk-...")
 .openAI(key: "sk-...")
 .ollama(model: "llama3")
-.foundationModels       // On-device, iOS 26 / macOS 26
+.foundationModels()     // On-device, iOS 26 / macOS 26 when FoundationModels is available
 ```
 
-## 13) Events and results
+## 12) Events and results
 
 ```swift
 public enum AgentEvent: Sendable {
-    case started(input: String)
-    case completed(result: AgentResult)
-    case failed(error: AgentError)
-    case cancelled
-    case outputToken(token: String)
-    case outputChunk(chunk: String)
-    case toolCallStarted(call: ToolCall)
-    case toolCallCompleted(call: ToolCall, result: ToolResult)
-    case handoffStarted(from: String, to: String, input: String)
-    case handoffCompleted(from: String, to: String)
-    // ... and more
+    case lifecycle(Lifecycle)
+    case tool(Tool)
+    case output(Output)
+    case handoff(Handoff)
+    case observation(Observation)
+
+    public enum Lifecycle: Sendable {
+        case started(input: String)
+        case completed(result: AgentResult)
+        case failed(error: AgentError)
+        case cancelled
+        case guardrailFailed(error: GuardrailError)
+        case iterationStarted(number: Int)
+        case iterationCompleted(number: Int)
+    }
+
+    public enum Tool: Sendable {
+        case started(call: ToolCall)
+        case partial(update: PartialToolCallUpdate)
+        case completed(call: ToolCall, result: ToolResult)
+        case failed(call: ToolCall, error: AgentError)
+    }
+
+    public enum Output: Sendable {
+        case token(String)
+        case chunk(String)
+        case thinking(thought: String)
+        case thinkingPartial(String)
+    }
 }
 
 public struct AgentResult: Sendable {
@@ -419,7 +436,7 @@ public struct AgentResult: Sendable {
 }
 ```
 
-## 14) Public macros
+## 13) Public macros
 
 | Macro | Applied To | Effect |
 |-------|-----------|--------|
@@ -428,7 +445,7 @@ public struct AgentResult: Sendable {
 | `@Traceable` | `struct` conforming to `AnyJSONTool` | Injects tracing around `execute()` |
 | `#Prompt(...)` | call site | Type-safe interpolated prompt string |
 
-## 15) Naming guarantees
+## 14) Naming guarantees
 
 - Observer APIs use the `observer` label.
 - Handoff callback naming is `onTransfer` / `transform` / `when`.

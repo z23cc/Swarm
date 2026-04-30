@@ -41,8 +41,19 @@ public enum StreamHelper {
     ) -> (stream: AsyncThrowingStream<T, Error>,
           continuation: AsyncThrowingStream<T, Error>.Continuation) {
         precondition(bufferSize > 0, "bufferSize must be positive")
+        return makeStream(bufferingPolicy: .bufferingNewest(bufferSize))
+    }
+
+    /// Create a stream with an explicit buffering policy.
+    ///
+    /// Use this for event streams where terminal lifecycle or tool events must
+    /// not be dropped under backpressure.
+    public static func makeStream<T: Sendable>(
+        bufferingPolicy: AsyncThrowingStream<T, Error>.Continuation.BufferingPolicy
+    ) -> (stream: AsyncThrowingStream<T, Error>,
+          continuation: AsyncThrowingStream<T, Error>.Continuation) {
         return AsyncThrowingStream<T, Error>.makeStream(
-            bufferingPolicy: .bufferingNewest(bufferSize)
+            bufferingPolicy: bufferingPolicy
         )
     }
 
@@ -90,7 +101,15 @@ public enum StreamHelper {
         bufferSize: Int = defaultBufferSize,
         operation: @escaping @Sendable (AsyncThrowingStream<T, Error>.Continuation) async throws -> Void
     ) -> AsyncThrowingStream<T, Error> {
-        let (stream, continuation): (AsyncThrowingStream<T, Error>, AsyncThrowingStream<T, Error>.Continuation) = makeStream(bufferSize: bufferSize)
+        makeTrackedStream(bufferingPolicy: .bufferingNewest(bufferSize), operation: operation)
+    }
+
+    /// Create a tracked stream with an explicit buffering policy.
+    public static func makeTrackedStream<T: Sendable>(
+        bufferingPolicy: AsyncThrowingStream<T, Error>.Continuation.BufferingPolicy,
+        operation: @escaping @Sendable (AsyncThrowingStream<T, Error>.Continuation) async throws -> Void
+    ) -> AsyncThrowingStream<T, Error> {
+        let (stream, continuation): (AsyncThrowingStream<T, Error>, AsyncThrowingStream<T, Error>.Continuation) = makeStream(bufferingPolicy: bufferingPolicy)
 
         let task = Task { @Sendable in
             do {
@@ -129,7 +148,16 @@ public enum StreamHelper {
         bufferSize: Int = defaultBufferSize,
         operation: @escaping @Sendable (A, AsyncThrowingStream<T, Error>.Continuation) async throws -> Void
     ) -> AsyncThrowingStream<T, Error> {
-        let (stream, continuation): (AsyncThrowingStream<T, Error>, AsyncThrowingStream<T, Error>.Continuation) = makeStream(bufferSize: bufferSize)
+        makeTrackedStream(for: actor, bufferingPolicy: .bufferingNewest(bufferSize), operation: operation)
+    }
+
+    /// Create an actor-isolated tracked stream with an explicit buffering policy.
+    public static func makeTrackedStream<A: Actor, T: Sendable>(
+        for actor: A,
+        bufferingPolicy: AsyncThrowingStream<T, Error>.Continuation.BufferingPolicy,
+        operation: @escaping @Sendable (A, AsyncThrowingStream<T, Error>.Continuation) async throws -> Void
+    ) -> AsyncThrowingStream<T, Error> {
+        let (stream, continuation): (AsyncThrowingStream<T, Error>, AsyncThrowingStream<T, Error>.Continuation) = makeStream(bufferingPolicy: bufferingPolicy)
 
         let task = Task { @Sendable in
             do {

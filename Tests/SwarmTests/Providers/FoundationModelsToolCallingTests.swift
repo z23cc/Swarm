@@ -8,6 +8,9 @@
     struct FoundationModelsToolCallingTests {
         @Test("LanguageModelSession no longer rejects tool requests outright")
         func languageModelSessionAcceptsToolRequests() async throws {
+            guard ProcessInfo.processInfo.environment["SWARM_RUN_LIVE_FOUNDATION_MODELS_TESTS"] == "1" else {
+                return
+            }
             guard #available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *) else {
                 return
             }

@@ -185,6 +185,7 @@ public actor HybridMemory: Memory {
     }
 
     public func clear() async {
+        generation += 1
         await shortTermMemory.clear()
         longTermSummary = ""
         pendingMessages.removeAll()
@@ -217,11 +218,16 @@ public actor HybridMemory: Memory {
     /// Whether a summarization pass is currently running.
     private var isUpdatingSummary: Bool = false
 
+    /// Increments when memory is cleared so suspended summarizers cannot
+    /// commit stale long-term context after `clear()` returns.
+    private var generation: Int = 0
+
     // MARK: - Private Methods
 
     private func updateLongTermSummary() async {
         guard !isUpdatingSummary else { return }
         guard !pendingMessages.isEmpty else { return }
+        let updateGeneration = generation
 
         isUpdatingSummary = true
         defer { isUpdatingSummary = false }
@@ -244,25 +250,34 @@ public actor HybridMemory: Memory {
 
             let didPreserve = await preservePendingMessages(
                 textToSummarize: textToSummarize,
-                newContent: newContent
+                newContent: newContent,
+                generation: updateGeneration
             )
 
             guard didPreserve else { break }
 
+            guard generation == updateGeneration else {
+                break
+            }
             removePending(messagesToSummarize)
         }
     }
 
     private func preservePendingMessages(
         textToSummarize: String,
-        newContent: String
+        newContent: String,
+        generation updateGeneration: Int
     ) async -> Bool {
         if await summarizer.isAvailable {
             do {
-                longTermSummary = try await summarizer.summarize(
+                let summary = try await summarizer.summarize(
                     textToSummarize,
                     maxTokens: configuration.longTermSummaryTokens
                 )
+                guard generation == updateGeneration else {
+                    return false
+                }
+                longTermSummary = summary
                 summarizationCount += 1
                 return true
             } catch {
@@ -270,15 +285,18 @@ public actor HybridMemory: Memory {
             }
         }
 
-        return await preserveWithFallback(newContent: newContent)
+        return await preserveWithFallback(newContent: newContent, generation: updateGeneration)
     }
 
-    private func preserveWithFallback(newContent: String) async -> Bool {
+    private func preserveWithFallback(newContent: String, generation updateGeneration: Int) async -> Bool {
         let fallbackTokenLimit = max(1, configuration.longTermSummaryTokens / 2)
         guard let truncated = try? await TruncatingSummarizer.shared.summarize(
             newContent,
             maxTokens: fallbackTokenLimit
         ) else {
+            return false
+        }
+        guard generation == updateGeneration else {
             return false
         }
 
@@ -317,11 +335,13 @@ public extension HybridMemory {
     ///
     /// - Parameter newSummary: The summary text to use.
     func setSummary(_ newSummary: String) async {
+        generation += 1
         longTermSummary = newSummary
     }
 
     /// Clears only the long-term summary, keeping recent messages.
     func clearSummary() async {
+        generation += 1
         longTermSummary = ""
         pendingMessages.removeAll()
     }

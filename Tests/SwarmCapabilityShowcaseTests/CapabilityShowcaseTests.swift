@@ -14,31 +14,38 @@ struct CapabilityShowcaseTests {
     @Test("deterministic scenarios pass")
     func deterministicScenariosPass() async throws {
         let showcase = CapabilityShowcase()
-        var results = try await showcase.runDeterministicScenarios()
-
-        let failedIDs = results
-            .filter { $0.status == .failed }
-            .map(\.id)
-
-        if !failedIDs.isEmpty {
-            var recovered: [CapabilityScenarioResult] = []
-            for id in failedIDs {
-                recovered.append(try await showcase.runScenario(id: id))
-            }
-
-            var recoveredByID: [String: CapabilityScenarioResult] = [:]
-            for result in recovered {
-                recoveredByID[result.id] = result
-            }
-
-            results = results.map { recoveredByID[$0.id] ?? $0 }
-        }
+        let results = try await showcase.runDeterministicScenarios()
 
         #expect(results.isEmpty == false)
         if !results.allSatisfy({ $0.status == .passed }) {
             Issue.record("Capability showcase summary:\n\(CapabilityShowcase.renderSummary(results))")
         }
         #expect(results.allSatisfy { $0.status == .passed })
+
+        // Strengthened assertions: verify externally-visible side effects rather
+        // than trusting the showcase's self-reported status flag. Each scenario
+        // must produce a non-empty summary describing what it exercised, and
+        // every required capability family must be covered by at least one
+        // passing scenario. Without these, a regression that broke a capability
+        // could still report "passed" if the showcase's status accounting drifted.
+        for result in results {
+            #expect(!result.id.isEmpty, "scenario id should not be empty")
+            #expect(!result.name.isEmpty, "scenario \(result.id) name should not be empty")
+            #expect(!result.summary.isEmpty, "scenario \(result.id) summary should not be empty")
+            #expect(!result.families.isEmpty, "scenario \(result.id) should declare at least one capability family")
+        }
+
+        let passedFamilies = Set(
+            results
+                .filter { $0.status == .passed }
+                .flatMap(\.families)
+        )
+        for family in CapabilityShowcase.requiredFamilies {
+            #expect(
+                passedFamilies.contains(family),
+                "required capability family \(family) is not covered by any passing scenario"
+            )
+        }
     }
 
     @Test("summary formatter includes ids and statuses")

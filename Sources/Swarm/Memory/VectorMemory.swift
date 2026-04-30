@@ -135,8 +135,12 @@ public actor VectorMemory: Memory {
     ///
     /// - Parameter message: The message to store.
     public func add(_ message: MemoryMessage) async {
+        let addGeneration = generation
         do {
             let embedding = try await embeddingProvider.embed(message.content)
+            guard generation == addGeneration else {
+                return
+            }
             let embeddedMessage = EmbeddedMessage(message: message, embedding: embedding)
             embeddedMessages.append(embeddedMessage)
         } catch {
@@ -186,6 +190,7 @@ public actor VectorMemory: Memory {
 
     /// Removes all messages from memory.
     public func clear() async {
+        generation += 1
         embeddedMessages.removeAll()
     }
 
@@ -243,10 +248,14 @@ public actor VectorMemory: Memory {
     /// - Parameter newMessages: Messages to add in order.
     public func addAll(_ newMessages: [MemoryMessage]) async {
         guard !newMessages.isEmpty else { return }
+        let addGeneration = generation
 
         do {
             let contents = newMessages.map(\.content)
             let embeddings = try await embeddingProvider.embed(contents)
+            guard generation == addGeneration else {
+                return
+            }
 
             for (message, embedding) in zip(newMessages, embeddings) {
                 embeddedMessages.append(EmbeddedMessage(
@@ -293,6 +302,10 @@ public actor VectorMemory: Memory {
 
     /// Stored messages with their embeddings.
     private var embeddedMessages: [EmbeddedMessage] = []
+
+    /// Increments when memory is cleared so suspended embedding work cannot
+    /// reinsert stale messages after `clear()` returns.
+    private var generation: Int = 0
 
     /// Token estimator for context retrieval.
     private let tokenEstimator: any TokenEstimator

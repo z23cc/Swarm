@@ -160,6 +160,7 @@ public actor SummaryMemory: Memory {
     }
 
     public func clear() async {
+        generation += 1
         summary = ""
         recentMessages.removeAll()
         totalMessagesAdded = 0
@@ -188,23 +189,49 @@ public actor SummaryMemory: Memory {
     /// Number of summarization operations performed.
     private var summarizationCount: Int = 0
 
+    /// Prevents actor reentrancy from starting overlapping summarization
+    /// commits while a summarizer call is suspended.
+    private var summarizationInProgress = false
+
+    /// Increments when memory is cleared so suspended summarizers cannot
+    /// commit stale state after `clear()` returns.
+    private var generation: Int = 0
+
     // MARK: - Private Methods
 
-    private func performSummarization() async {
+    private func performSummarization(force: Bool = false) async {
+        guard !summarizationInProgress else { return }
+
+        summarizationInProgress = true
+        defer { summarizationInProgress = false }
+
+        repeat {
+            let summarized = await summarizeOneBatch(force: force)
+            if !summarized {
+                return
+            }
+        } while recentMessages.count >= configuration.summarizationThreshold
+    }
+
+    private func summarizeOneBatch(force: Bool) async -> Bool {
+        let summarizationGeneration = generation
         // Keep only recent messages, summarize the rest
         let messagesToKeep = configuration.recentMessageCount
-        let toSummarize = Array(recentMessages.prefix(recentMessages.count - messagesToKeep))
-        recentMessages = Array(recentMessages.suffix(messagesToKeep))
+        guard recentMessages.count > messagesToKeep else { return false }
+        guard force || recentMessages.count >= configuration.summarizationThreshold else { return false }
 
-        guard !toSummarize.isEmpty else { return }
+        let toSummarize = Array(recentMessages.prefix(recentMessages.count - messagesToKeep))
+        guard !toSummarize.isEmpty else { return false }
+
+        let summarySnapshot = summary
 
         // Combine with existing summary
-        let textToSummarize: String = if summary.isEmpty {
+        let textToSummarize: String = if summarySnapshot.isEmpty {
             toSummarize.map(\.formattedContent).joined(separator: "\n")
         } else {
             """
             Previous summary:
-            \(summary)
+            \(summarySnapshot)
 
             Additional conversation:
             \(toSummarize.map(\.formattedContent).joined(separator: "\n"))
@@ -213,24 +240,50 @@ public actor SummaryMemory: Memory {
 
         // Try primary summarizer, fall back if needed
         do {
+            let summarized: String
             if await summarizer.isAvailable {
-                summary = try await summarizer.summarize(textToSummarize, maxTokens: configuration.summaryTokenTarget)
+                summarized = try await summarizer.summarize(textToSummarize, maxTokens: configuration.summaryTokenTarget)
             } else {
-                summary = try await fallbackSummarizer.summarize(textToSummarize, maxTokens: configuration.summaryTokenTarget)
+                summarized = try await fallbackSummarizer.summarize(textToSummarize, maxTokens: configuration.summaryTokenTarget)
             }
+            guard generation == summarizationGeneration else {
+                return false
+            }
+            removeSummarizedPrefix(toSummarize)
+            summary = summarized
             summarizationCount += 1
+            return true
         } catch {
             // On failure, use truncation as last resort
             if let truncated = try? await TruncatingSummarizer.shared.summarize(
                 textToSummarize,
                 maxTokens: configuration.summaryTokenTarget
             ) {
+                guard generation == summarizationGeneration else {
+                    return false
+                }
+                removeSummarizedPrefix(toSummarize)
                 summary = truncated
+                return true
             } else {
+                guard generation == summarizationGeneration else {
+                    return false
+                }
                 // Ultimate fallback: just prefix
+                removeSummarizedPrefix(toSummarize)
                 summary = String(textToSummarize.prefix(configuration.summaryTokenTarget * 4))
+                return true
             }
         }
+    }
+
+    private func removeSummarizedPrefix(_ summarizedMessages: [MemoryMessage]) {
+        guard recentMessages.prefix(summarizedMessages.count).elementsEqual(summarizedMessages) else {
+            let summarizedIDs = Set(summarizedMessages.map(\.id))
+            recentMessages.removeAll { summarizedIDs.contains($0.id) }
+            return
+        }
+        recentMessages.removeFirst(summarizedMessages.count)
     }
 }
 
@@ -243,13 +296,14 @@ public extension SummaryMemory {
     /// and want to compress before continuing.
     func forceSummarize() async {
         guard recentMessages.count > configuration.recentMessageCount else { return }
-        await performSummarization()
+        await performSummarization(force: true)
     }
 
     /// Sets a custom summary, replacing any existing one.
     ///
     /// - Parameter newSummary: The summary text to use.
     func setSummary(_ newSummary: String) async {
+        generation += 1
         summary = newSummary
     }
 }

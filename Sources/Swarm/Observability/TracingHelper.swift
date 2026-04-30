@@ -37,15 +37,19 @@ public struct TracingHelper: Sendable {
     /// Name of the agent being traced
     public let agentName: String
 
+    /// Whether trace events may include raw prompt, reasoning, plan, and tool argument content.
+    public let recordsSensitiveContent: Bool
+
     /// Creates a new tracing helper
     ///
     /// - Parameters:
     ///   - tracer: The tracer to emit events to (nil for no-op)
     ///   - agentName: The name of the agent for trace identification
-    public init(tracer: (any Tracer)?, agentName: String) {
+    public init(tracer: (any Tracer)?, agentName: String, recordsSensitiveContent: Bool = false) {
         self.tracer = tracer
         traceId = UUID()
         self.agentName = agentName
+        self.recordsSensitiveContent = recordsSensitiveContent
         startTime = .now
     }
 
@@ -122,9 +126,34 @@ public struct TracingHelper: Sendable {
             traceId: traceId,
             kind: .thought,
             level: .trace,
+            message: recordsSensitiveContent ? thought : "Thought recorded",
+            metadata: [
+                "thought_length": .int(thought.count),
+                "thought_redacted": .bool(!recordsSensitiveContent)
+            ].includingSensitiveString("thought", thought, when: recordsSensitiveContent),
+            agentName: agentName
+        ))
+    }
+
+    /// Trace a thought/reasoning step with explicit sensitive-content capture.
+    ///
+    /// Prefer the default redacted behavior unless the active tracer is approved
+    /// to store model-internal reasoning or user-sensitive content.
+    public func traceThought(_ thought: String, includeSensitiveContent: Bool) async {
+        guard includeSensitiveContent else {
+            await traceThought(thought)
+            return
+        }
+
+        guard let tracer else { return }
+        await tracer.trace(TraceEvent(
+            traceId: traceId,
+            kind: .thought,
+            level: .trace,
             message: thought,
             metadata: [
                 "thought_length": .int(thought.count),
+                "thought_redacted": .bool(false),
                 "thought": .string(thought)
             ],
             agentName: agentName
@@ -141,8 +170,9 @@ public struct TracingHelper: Sendable {
             kind: .plan,
             message: "Plan created",
             metadata: [
-                "plan": .string(plan)
-            ],
+                "plan_length": .int(plan.count),
+                "plan_redacted": .bool(!recordsSensitiveContent)
+            ].includingSensitiveString("plan", plan, when: recordsSensitiveContent),
             agentName: agentName
         ))
     }
@@ -167,8 +197,10 @@ public struct TracingHelper: Sendable {
             message: "Tool call: \(name)",
             metadata: [
                 "tool_name": .string(name),
-                "arguments": .dictionary(arguments)
-            ],
+                "argument_count": .int(arguments.count),
+                "argument_keys": .array(arguments.keys.sorted().map { .string($0) }),
+                "arguments_redacted": .bool(!recordsSensitiveContent)
+            ].includingSensitiveDictionary("arguments", arguments, when: recordsSensitiveContent),
             agentName: agentName,
             toolName: name
         ))
@@ -284,15 +316,23 @@ public struct TracingHelper: Sendable {
     public func traceDecision(_ decision: String, options: [String] = []) async {
         guard let tracer else { return }
         var metadata: [String: SendableValue] = [
-            "decision": .string(decision)
+            "decision_length": .int(decision.count),
+            "decision_redacted": .bool(!recordsSensitiveContent),
+            "options_count": .int(options.count)
         ]
         if !options.isEmpty {
-            metadata["options"] = .array(options.map { .string($0) })
+            metadata["option_lengths"] = .array(options.map { .int($0.count) })
+        }
+        if recordsSensitiveContent {
+            metadata["decision"] = .string(decision)
+            if !options.isEmpty {
+                metadata["options"] = .array(options.map { .string($0) })
+            }
         }
         await tracer.trace(TraceEvent(
             traceId: traceId,
             kind: .decision,
-            message: "Decision: \(decision)",
+            message: recordsSensitiveContent ? "Decision: \(decision)" : "Decision recorded",
             metadata: metadata,
             agentName: agentName
         ))
@@ -332,11 +372,23 @@ public struct TracingHelper: Sendable {
         metadata: [String: SendableValue] = [:]
     ) async {
         guard let tracer else { return }
+        let safeMetadata: [String: SendableValue]
+        if recordsSensitiveContent {
+            safeMetadata = metadata.merging([
+                "metadata_redacted": .bool(false)
+            ]) { current, _ in current }
+        } else {
+            safeMetadata = [
+                "message_length": .int(message.count),
+                "metadata_keys": .array(metadata.keys.sorted().map { .string($0) }),
+                "metadata_redacted": .bool(true)
+            ]
+        }
         await tracer.trace(TraceEvent(
             traceId: traceId,
             kind: kind,
-            message: message,
-            metadata: metadata,
+            message: recordsSensitiveContent ? message : "Custom event recorded",
+            metadata: safeMetadata,
             agentName: agentName
         ))
     }
@@ -345,6 +397,26 @@ public struct TracingHelper: Sendable {
 
     /// Start time of the traced operation
     private let startTime: ContinuousClock.Instant
+}
+
+private extension [String: SendableValue] {
+    func includingSensitiveString(_ key: String, _ value: String, when shouldInclude: Bool) -> [String: SendableValue] {
+        guard shouldInclude else { return self }
+        var copy = self
+        copy[key] = .string(value)
+        return copy
+    }
+
+    func includingSensitiveDictionary(
+        _ key: String,
+        _ value: [String: SendableValue],
+        when shouldInclude: Bool
+    ) -> [String: SendableValue] {
+        guard shouldInclude else { return self }
+        var copy = self
+        copy[key] = .dictionary(value)
+        return copy
+    }
 }
 
 // MARK: - Duration Extension

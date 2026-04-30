@@ -28,6 +28,10 @@ HIVE_EXTENSIBILITY_INTEGRATION_PLAN.md
 PRODUCTION_READINESS_AUDIT.md
 tasks/
 scripts/
+!scripts/
+scripts/*
+!scripts/ci/
+!scripts/ci/**
 
 # Internal documentation (plans, prompts, work packages, validation)
 docs/plans/
@@ -61,13 +65,9 @@ docs/reference/readme-audit-report.md
 node_modules/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
-package-lock.json
-package.json
 
-# Swift tooling config (contributors: these exist locally, gitignored for clean root)
+# Swift tooling config
 .swift-version
-.swiftformat
-.swiftlint.yml
 
 # SPM resolved file (library — consumers resolve their own deps)
 Package.resolved

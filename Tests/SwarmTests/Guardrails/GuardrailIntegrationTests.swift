@@ -53,6 +53,25 @@ private actor MockGuardrailAgent: AgentRuntime {
     private let responseHandler: @Sendable (String) async throws -> String
 }
 
+private actor RecordingGuardrailObserver: AgentObserver {
+    struct Event: Sendable, Equatable {
+        let name: String
+        let type: GuardrailType
+        let message: String?
+    }
+
+    private(set) var events: [Event] = []
+
+    func onGuardrailTriggered(
+        context _: AgentContext?,
+        guardrailName: String,
+        guardrailType: GuardrailType,
+        result: GuardrailResult
+    ) async {
+        events.append(Event(name: guardrailName, type: guardrailType, message: result.message))
+    }
+}
+
 // MARK: - GuardrailIntegrationTests
 
 @Suite("Guardrail Integration Tests")
@@ -384,15 +403,40 @@ struct GuardrailIntegrationTests {
 extension GuardrailIntegrationTests {
     @Test("ToolRegistry.execute() runs guardrails - full integration")
     func toolRegistryWithGuardrails() async throws {
-        // NOTE: This test will require ToolRegistry to be updated with guardrail support
-        // For now, we document the expected behavior
+        let inputGuardrail = ClosureToolInputGuardrail(name: "deny_secret_argument") { data in
+            if data.arguments["query"]?.stringValue == "secret" {
+                return .tripwire(message: "secret input blocked")
+            }
+            return .passed(message: "input accepted")
+        }
+        let outputGuardrail = ClosureToolOutputGuardrail(name: "deny_secret_output") { _, output in
+            if output.stringValue == "secret result" {
+                return .tripwire(message: "secret output blocked")
+            }
+            return .passed(message: "output accepted")
+        }
+        let tool = MockTool(
+            name: "lookup",
+            parameters: [
+                ToolParameter(name: "query", description: "Query", type: .string, isRequired: true)
+            ],
+            inputGuardrails: [inputGuardrail],
+            outputGuardrails: [outputGuardrail]
+        ) { arguments in
+            .string(arguments["query"]?.stringValue == "leak" ? "secret result" : "public result")
+        }
+        let registry = try ToolRegistry(tools: [tool])
 
-        // Given: A ToolRegistry with tools that have guardrails
-        // When: Executing a tool through the registry
-        // Then: Input guardrails run before execution, output guardrails run after
+        let allowed = try await registry.execute(toolNamed: "lookup", arguments: ["query": .string("public")])
+        #expect(allowed == .string("public result"))
 
-        // This test is a placeholder for when ToolRegistry integration is complete
-        #expect(Bool(true), "ToolRegistry integration pending implementation")
+        await #expect(throws: GuardrailError.self) {
+            _ = try await registry.execute(toolNamed: "lookup", arguments: ["query": .string("secret")])
+        }
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await registry.execute(toolNamed: "lookup", arguments: ["query": .string("leak")])
+        }
     }
 
     // MARK: - Combined Scenarios
@@ -674,5 +718,86 @@ extension GuardrailIntegrationTests {
         let latestStart = max(interval1.start, interval2.start)
         let earliestEnd = min(interval1.end, interval2.end)
         #expect(latestStart < earliestEnd, "Expected parallel guardrail execution; intervals did not overlap.")
+    }
+
+    @Test("Parallel input guardrail tripwire emits observer event")
+    func parallelInputGuardrailTripwireEmitsObserverEvent() async throws {
+        let observer = RecordingGuardrailObserver()
+        let context = AgentContext(input: "blocked")
+        let guardrail = InputGuard("parallel_input_blocker") { _, _ in
+            .tripwire(message: "input blocked")
+        }
+        let runner = GuardrailRunner(configuration: .parallel, observer: observer)
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runInputGuardrails([guardrail], input: "blocked", context: context)
+        }
+
+        let events = await observer.events
+        #expect(events == [
+            RecordingGuardrailObserver.Event(name: "parallel_input_blocker", type: .input, message: "input blocked")
+        ])
+    }
+
+    @Test("Parallel output guardrail tripwire emits observer event")
+    func parallelOutputGuardrailTripwireEmitsObserverEvent() async throws {
+        let observer = RecordingGuardrailObserver()
+        let context = AgentContext(input: "request")
+        let agent = MockGuardrailAgent(name: "Guarded")
+        let guardrail = OutputGuard("parallel_output_blocker") { _, _, _ in
+            .tripwire(message: "output blocked")
+        }
+        let runner = GuardrailRunner(configuration: .parallel, observer: observer)
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runOutputGuardrails([guardrail], output: "blocked", agent: agent, context: context)
+        }
+
+        let events = await observer.events
+        #expect(events == [
+            RecordingGuardrailObserver.Event(name: "parallel_output_blocker", type: .output, message: "output blocked")
+        ])
+    }
+
+    @Test("Parallel tool input guardrail tripwire emits observer event")
+    func parallelToolInputGuardrailTripwireEmitsObserverEvent() async throws {
+        let observer = RecordingGuardrailObserver()
+        let agent = MockGuardrailAgent(name: "ToolAgent")
+        let tool = MockTool(name: "lookup")
+        let data = ToolGuardrailData(tool: tool, arguments: ["query": .string("blocked")], agent: agent, context: nil)
+        let guardrail = ClosureToolInputGuardrail(name: "parallel_tool_input_blocker") { _ in
+            .tripwire(message: "tool input blocked")
+        }
+        let runner = GuardrailRunner(configuration: .parallel, observer: observer)
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runToolInputGuardrails([guardrail], data: data)
+        }
+
+        let events = await observer.events
+        #expect(events == [
+            RecordingGuardrailObserver.Event(name: "parallel_tool_input_blocker", type: .toolInput, message: "tool input blocked")
+        ])
+    }
+
+    @Test("Parallel tool output guardrail tripwire emits observer event")
+    func parallelToolOutputGuardrailTripwireEmitsObserverEvent() async throws {
+        let observer = RecordingGuardrailObserver()
+        let agent = MockGuardrailAgent(name: "ToolAgent")
+        let tool = MockTool(name: "lookup")
+        let data = ToolGuardrailData(tool: tool, arguments: [:], agent: agent, context: nil)
+        let guardrail = ClosureToolOutputGuardrail(name: "parallel_tool_output_blocker") { _, _ in
+            .tripwire(message: "tool output blocked")
+        }
+        let runner = GuardrailRunner(configuration: .parallel, observer: observer)
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runToolOutputGuardrails([guardrail], data: data, output: .string("blocked"))
+        }
+
+        let events = await observer.events
+        #expect(events == [
+            RecordingGuardrailObserver.Event(name: "parallel_tool_output_blocker", type: .toolOutput, message: "tool output blocked")
+        ])
     }
 }
