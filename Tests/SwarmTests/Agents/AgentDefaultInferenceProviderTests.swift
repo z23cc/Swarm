@@ -1,8 +1,35 @@
+import Foundation
 @testable import Swarm
 import Testing
 
 @Suite("Agent Defaults")
 struct AgentDefaultInferenceProviderTests {
+    @Test("privacyRequired does not route through an explicit non-private provider")
+    func privacyRequiredSkipsExplicitNonPrivateProvider() async throws {
+        try await withSwarmConfigurationIsolation {
+            let cloudProvider = MockInferenceProvider(responses: ["cloud response"])
+            let configuration = AgentConfiguration.default
+                .inferencePolicy(InferencePolicy(privacyRequired: true))
+            let agent = try Agent(
+                instructions: "Keep this private.",
+                configuration: configuration,
+                inferenceProvider: cloudProvider
+            )
+
+            do {
+                _ = try await agent.run("secret")
+            } catch {
+                // Foundation Models may be unavailable or unavailable for the test prompt.
+                // The privacy invariant is that the explicit non-private provider is not called.
+            }
+
+            #expect(await cloudProvider.generateCallCount == 0)
+            #expect(await cloudProvider.toolCallCalls.isEmpty)
+            #expect(await cloudProvider.generateMessageCalls.isEmpty)
+            #expect(await cloudProvider.toolCallMessageCalls.isEmpty)
+        }
+    }
+
     @Test("Throws if no inference provider is set and Foundation Models are unavailable")
     func throwsIfNoProviderAndFoundationModelsUnavailable() async {
         await withSwarmConfigurationIsolation {
@@ -31,6 +58,9 @@ struct AgentDefaultInferenceProviderTests {
 
     @Test("Foundation Models provider accepts tool-call requests without explicit rejection")
     func foundationModelsProviderAcceptsToolCalls() async throws {
+        guard ProcessInfo.processInfo.environment["SWARM_RUN_LIVE_FOUNDATION_MODELS_TESTS"] == "1" else {
+            return
+        }
         guard let provider = DefaultInferenceProviderFactory.makeFoundationModelsProviderIfAvailable() else {
             return
         }

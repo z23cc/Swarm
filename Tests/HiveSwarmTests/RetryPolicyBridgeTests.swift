@@ -6,7 +6,7 @@
 import Foundation
 import HiveCore
 import Testing
-@testable import Swarm
+@_spi(ColonyInternal) @testable import Swarm
 
 @Suite("RetryPolicyBridge — Swarm to Hive mapping")
 struct RetryPolicyBridgeTests {
@@ -213,7 +213,7 @@ private actor RetryModelScript {
     func nextChunks() throws -> [HiveChatStreamChunk] {
         if failsRemaining > 0 {
             failsRemaining -= 1
-            throw HiveRuntimeError.modelStreamInvalid("transient failure")
+            throw SwarmRuntimeError.modelStreamInvalid("transient failure")
         }
         return successChunks
     }
@@ -227,7 +227,7 @@ private struct RetryScriptedModelClient: HiveModelClient {
         for chunk in chunks {
             if case let .final(response) = chunk { return response }
         }
-        throw HiveRuntimeError.modelStreamInvalid("Missing final chunk.")
+        throw SwarmRuntimeError.modelStreamInvalid("Missing final chunk.")
     }
 
     func stream(_ request: HiveChatRequest) -> AsyncThrowingStream<HiveChatStreamChunk, Error> {

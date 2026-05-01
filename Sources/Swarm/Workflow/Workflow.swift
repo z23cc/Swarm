@@ -87,7 +87,7 @@ import Foundation
 /// ### Durable Execution
 /// - ``durable``
 public struct Workflow: Sendable {
-    enum Step: @unchecked Sendable {
+    enum Step: Sendable {
         case single(any AgentRuntime)
         case parallel([any AgentRuntime], merge: MergeStrategy)
         case route(@Sendable (String) -> (any AgentRuntime)?)
@@ -108,7 +108,7 @@ public struct Workflow: Sendable {
     /// - ``indexed``
     /// - ``first``
     /// - ``custom(_:)``
-    public enum MergeStrategy: @unchecked Sendable {
+    public enum MergeStrategy: Sendable {
         /// Merges results into a JSON object: `{"0": "output0", "1": "output1", ...}`.
         ///
         /// Use this strategy when downstream agents or tools need machine-parseable
@@ -404,10 +404,8 @@ public struct Workflow: Sendable {
     ///
     /// for try await event in stream {
     ///     switch event {
-    ///     case .lifecycle(.started):
-    ///         print("Workflow started")
-    ///     case .agentOutput(let output):
-    ///         print("Agent output: \(output)")
+    ///     case .lifecycle(.started(input: let input)):
+    ///         print("Workflow started: \(input)")
     ///     case .lifecycle(.completed(let result)):
     ///         print("Completed: \(result.output)")
     ///     case .lifecycle(.failed(let error)):
@@ -418,7 +416,7 @@ public struct Workflow: Sendable {
     /// }
     /// ```
     public func stream(_ input: String) -> AsyncThrowingStream<AgentEvent, Error> {
-        StreamHelper.makeTrackedStream { continuation in
+        StreamHelper.makeTrackedStream(bufferingPolicy: .unbounded) { continuation in
             continuation.yield(.lifecycle(.started(input: input)))
             do {
                 let result = try await run(input)
@@ -454,16 +452,39 @@ public struct Workflow: Sendable {
         _ operation: @escaping @Sendable () async throws -> AgentResult
     ) async throws -> AgentResult {
         if let timeoutDuration {
-            return try await withThrowingTaskGroup(of: AgentResult.self) { group in
-                group.addTask { try await operation() }
-                group.addTask {
-                    try await Task.sleep(for: timeoutDuration)
-                    throw AgentError.timeout(duration: timeoutDuration)
+            let coordinator = WorkflowTimedOperationCoordinator<AgentResult>()
+            return try await withTaskCancellationHandler(
+                operation: {
+                    try await withCheckedThrowingContinuation { continuation in
+                        coordinator.install(continuation: continuation)
+
+                        let operationTask = Task {
+                            do {
+                                coordinator.finish(returning: try await operation())
+                            } catch {
+                                coordinator.finish(throwing: error)
+                            }
+                        }
+                        coordinator.setOperationTask(operationTask)
+
+                        let timeoutTask = Task {
+                            do {
+                                try await Task.sleep(for: timeoutDuration)
+                                operationTask.cancel()
+                                coordinator.finish(throwing: AgentError.timeout(duration: timeoutDuration))
+                            } catch is CancellationError {
+                                return
+                            } catch {
+                                coordinator.finish(throwing: error)
+                            }
+                        }
+                        coordinator.setTimeoutTask(timeoutTask)
+                    }
+                },
+                onCancel: {
+                    coordinator.cancelPending(with: CancellationError())
                 }
-                let result = try await group.next()!
-                group.cancelAll()
-                return result
-            }
+            )
         }
         return try await operation()
     }
@@ -505,20 +526,30 @@ public struct Workflow: Sendable {
 
         case .parallel(let agents, let merge):
             let inputSnapshot = input
-            let results = try await withThrowingTaskGroup(of: AgentResult.self, returning: [AgentResult].self) { group in
-                for agent in agents {
+            let completedResults = try await withThrowingTaskGroup(
+                of: (Int, AgentResult).self,
+                returning: [(Int, AgentResult)].self
+            ) { group in
+                for (index, agent) in agents.enumerated() {
+                    let observer = observer
                     group.addTask {
-                        try await agent.run(inputSnapshot, session: nil, observer: nil)
+                        (index, try await agent.run(inputSnapshot, session: nil, observer: observer))
                     }
                 }
 
-                var collected: [AgentResult] = []
+                var collected: [(Int, AgentResult)] = []
                 for try await result in group {
                     collected.append(result)
                 }
                 return collected
             }
 
+            let results = switch merge {
+            case .first:
+                completedResults.map(\.1)
+            default:
+                completedResults.sorted { $0.0 < $1.0 }.map(\.1)
+            }
             let mergedOutput = mergeResults(results, strategy: merge)
             return AgentResult(output: mergedOutput)
 
@@ -611,5 +642,80 @@ public struct Workflow: Sendable {
 
         let repeatSignature = "repeat:\(repeatCondition != nil):\(maxRepeatIterations)"
         return (parts + [repeatSignature]).joined(separator: "|")
+    }
+}
+
+private final class WorkflowTimedOperationCoordinator<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+    private var operationTask: Task<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
+    private var completed = false
+
+    func install(continuation: CheckedContinuation<T, Error>) {
+        lock.lock()
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func setOperationTask(_ task: Task<Void, Never>) {
+        lock.lock()
+        operationTask = task
+        lock.unlock()
+    }
+
+    func setTimeoutTask(_ task: Task<Void, Never>) {
+        lock.lock()
+        timeoutTask = task
+        lock.unlock()
+    }
+
+    func finish(returning value: T) {
+        complete { continuation in
+            continuation.resume(returning: value)
+        }
+    }
+
+    func finish(throwing error: Error) {
+        complete { continuation in
+            continuation.resume(throwing: error)
+        }
+    }
+
+    func cancelPending(with error: Error) {
+        let pendingState = takePendingState()
+        pendingState.operationTask?.cancel()
+        pendingState.timeoutTask?.cancel()
+        pendingState.continuation?.resume(throwing: error)
+    }
+
+    private func complete(_ resume: (CheckedContinuation<T, Error>) -> Void) {
+        let pendingState = takePendingState()
+        pendingState.operationTask?.cancel()
+        pendingState.timeoutTask?.cancel()
+        guard let continuation = pendingState.continuation else { return }
+        resume(continuation)
+    }
+
+    private func takePendingState() -> (
+        continuation: CheckedContinuation<T, Error>?,
+        operationTask: Task<Void, Never>?,
+        timeoutTask: Task<Void, Never>?
+    ) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard completed == false else {
+            return (nil, nil, nil)
+        }
+
+        completed = true
+        let pendingContinuation = continuation
+        let pendingOperationTask = operationTask
+        let pendingTimeoutTask = timeoutTask
+        continuation = nil
+        operationTask = nil
+        timeoutTask = nil
+        return (pendingContinuation, pendingOperationTask, pendingTimeoutTask)
     }
 }

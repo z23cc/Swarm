@@ -2,11 +2,11 @@
 
 > [!WARNING]
 > This reference contains legacy sections from the removed DSL/orchestration APIs.
-> It is archival, not the source of truth for the current public API surface in 0.5.0.
+> It is archival, not the source of truth for the current public API surface in 0.5.1.
 > Use `Workflow` as the canonical composition API. Durable checkpoint/resume APIs are under `workflow.durable`.
 > Prefer `README.md` + `docs/guide/getting-started.md` + `docs/reference/overview.md` for current API usage.
 
-> **Version**: 0.5.0 · **Swift**: 6.2+ · **Platforms**: macOS 26+, iOS 26+, Linux (Ubuntu 22.04+)
+> **Version**: 0.5.1 · **Swift**: 6.2+ · **Platforms**: macOS 26+, iOS 26+, Linux (Ubuntu 22.04+)
 >
 > A Swift-native multi-agent workflow framework — "LangChain for Apple platforms."
 
@@ -172,11 +172,11 @@ let result = try await ResearchWorkflow().run("Explain quantum computing")
 ```swift
 for try await event in agent.stream("Tell me a story") {
     switch event {
-    case .outputToken(let token):
+    case .output(.token(let token)):
         print(token, terminator: "")
-    case .toolCallStarted(let call):
+    case .tool(.started(let call)):
         print("\n[Calling \(call.toolName)...]")
-    case .completed(let result):
+    case .lifecycle(.completed(let result)):
         print("\nDone in \(result.duration)")
     default:
         break
@@ -412,22 +412,38 @@ public struct AgentResponse: Sendable {
 
 ```swift
 public enum AgentEvent: Sendable {
-    case agentStarted(name: String)
-    case outputToken(token: String)
-    case thinking(thought: String)
-    case thinkingPartial(partialThought: String)
-    case llmStarted(model: String?, promptTokens: Int?)
-    case llmCompleted(model: String?, outputTokens: Int?, duration: Duration?)
-    case toolCallStarted(call: ToolCall)
-    case toolCallPartial(update: PartialToolCallUpdate)
-    case toolCallCompleted(result: ToolResult)
-    case toolCallFailed(callId: UUID, error: String)
-    case handoff(from: String, to: String)
-    case guardrailTriggered(name: String, type: GuardrailType, result: GuardrailResult)
-    case iterationStarted(number: Int)
-    case iterationCompleted(number: Int)
-    case completed(result: AgentResult)
-    case failed(error: SendableErrorWrapper)
+    case lifecycle(Lifecycle)
+    case tool(Tool)
+    case output(Output)
+    case handoff(Handoff)
+    case observation(Observation)
+
+    public enum Lifecycle: Sendable {
+        case started(input: String)
+        case completed(result: AgentResult)
+        case failed(error: AgentError)
+        case cancelled
+        case guardrailFailed(error: GuardrailError)
+        case iterationStarted(number: Int)
+        case iterationCompleted(number: Int)
+    }
+
+    public enum Tool: Sendable {
+        case started(call: ToolCall)
+        case partial(update: PartialToolCallUpdate)
+        case completed(call: ToolCall, result: ToolResult)
+        case failed(call: ToolCall, error: AgentError)
+    }
+
+    public enum Output: Sendable {
+        case token(String)
+        case chunk(String)
+        case thinking(thought: String)
+        case thinkingPartial(String)
+    }
+
+    public enum Handoff: Sendable { /* requested, started, completed, skipped */ }
+    public enum Observation: Sendable { /* decisions, guardrails, memory, LLM telemetry */ }
 }
 ```
 

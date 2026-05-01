@@ -13,13 +13,21 @@ export default defineConfig({
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
     ['link', { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap' }],
     // Favicon
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/Swarm/logo.svg' }],
   ],
 
-  ignoreDeadLinks: true,
+  ignoreDeadLinks: false,
   appearance: 'dark',
   lastUpdated: true,
   cleanUrls: true,
+
+  markdown: {
+    // Register `svg` as an alias for `xml` so ` ```svg ` fences highlight cleanly
+    // instead of falling back to `txt` and emitting build-time warnings.
+    languageAlias: {
+      svg: 'xml',
+    },
+  },
 
   // Exclude internal planning docs that contain raw angle brackets
   srcExclude: [
@@ -31,13 +39,15 @@ export default defineConfig({
     '**/migration-plan_*.md',
     '**/subagent-context-findings.md',
     '**/MultiProvider.md',
+    '**/swarm-complete-reference.md',
+    '**/reference/documentation-improvement-plan.md',
     '**/plans/**',
     '**/validation/**',
     '**/work-packages/**',
   ],
 
   themeConfig: {
-    logo: '/logo.svg',
+    logo: '/Swarm/logo.svg',
 
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
@@ -61,7 +71,8 @@ export default defineConfig({
           text: 'API Reference',
           items: [
             { text: 'Overview', link: '/reference/overview' },
-            { text: 'Complete Reference', link: '/swarm-complete-reference' },
+            { text: 'Front-Facing API', link: '/reference/front-facing-api' },
+            { text: 'API Catalog', link: '/reference/api-catalog' },
           ]
         },
       ],
@@ -70,7 +81,8 @@ export default defineConfig({
           text: 'API Reference',
           items: [
             { text: 'Overview', link: '/reference/overview' },
-            { text: 'Complete Reference', link: '/swarm-complete-reference' },
+            { text: 'Front-Facing API', link: '/reference/front-facing-api' },
+            { text: 'API Catalog', link: '/reference/api-catalog' },
           ]
         },
       ],

@@ -47,7 +47,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: ${{ runner.os }}-swift-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-swift-${{ hashFiles('Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-swift-
 
@@ -64,4 +64,3 @@ jobs:
           claude_args: >-
             --allowed-tools
             "Bash(swift build:*),Bash(swift test:*),Bash(swift package:*),Bash(swiftlint:*),Bash(swiftformat:*),Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr create:*),Bash(git:*)"
-

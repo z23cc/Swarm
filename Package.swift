@@ -13,7 +13,6 @@ var packageProducts: [Product] = [
 
 if includeDemo {
     packageProducts.append(.executable(name: "SwarmDemo", targets: ["SwarmDemo"]))
-    packageProducts.append(.executable(name: "ContextBenchmark", targets: ["ContextBenchmark"]))
     packageProducts.append(.executable(name: "SwarmMCPServerDemo", targets: ["SwarmMCPServerDemo"]))
 }
 
@@ -49,7 +48,7 @@ var packageDependencies: [Package.Dependency] = [
     ),
     .package(url: "https://github.com/christopherkarani/ContextCore.git", exact: "1.0.0"),
     .package(url: "https://github.com/christopherkarani/Membrane", exact: "0.1.3"),
-    .package(url: "https://github.com/christopherkarani/Hive", exact: "0.1.9"),
+    .package(url: "https://github.com/christopherkarani/Hive", exact: "0.2.0"),
 ]
 
 var swarmDependencies: [Target.Dependency] = [
@@ -165,6 +164,7 @@ var packageTargets: [Target] = [
     .testTarget(
         name: "SwarmMacrosTests",
         dependencies: [
+            "Swarm",
             "SwarmMacros",
             .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax")
         ],
@@ -196,16 +196,6 @@ if includeDemo {
     packageTargets.append(
         .executableTarget(
             name: "SwarmDemo",
-            dependencies: ["Swarm"],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ]
-        )
-    )
-
-    packageTargets.append(
-        .executableTarget(
-            name: "ContextBenchmark",
             dependencies: ["Swarm"],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")

@@ -1,9 +1,9 @@
 # Swarm Public API Catalog
 
-Generated from `Sources/Swarm/` on 2026-03-14.
+Generated from `Sources/Swarm/` on 2026-04-30.
 
 - Scope: all `.swift` files under `Sources/Swarm/`, excluding `Internal/GraphRuntime/`
-- Source files scanned: 134
+- Source files scanned: 153
 - Public/open symbols cataloged: 2423
 
 ## 1. Swarm (entry point)
@@ -257,13 +257,6 @@ Generated from `Sources/Swarm/` on 2026-03-14.
 | 210 | var | public | AgentResult.description | `public var description: String { get }` |
 | 227 | var | public | AgentResult.runtimeEngine | `public var runtimeEngine: String? { get }` |
 
-### Core/AgentRuntime+Identity.swift
-
-| Line | Kind | Access | Name | Signature |
-|------|------|--------|------|-----------|
-| 27 | protocol | public | AgentRuntimeIdentifiable | `public protocol AgentRuntimeIdentifiable : Sendable` |
-| 32 | var | public | AgentRuntimeIdentifiable.runtimeIdentity | `public var runtimeIdentity: String { get }` |
-
 ### Core/AgentRuntime.swift
 
 | Line | Kind | Access | Name | Signature |
@@ -356,16 +349,6 @@ Generated from `Sources/Swarm/` on 2026-03-14.
 | 486 | var | public | InferenceResponse.usage | `public let usage: TokenUsage?` |
 | 489 | var | public | InferenceResponse.hasToolCalls | `public var hasToolCalls: Bool { get }` |
 | 499 | func | public | InferenceResponse.init(content:toolCalls:finishReason:usage:) | `public init(content: String? = nil, toolCalls: [InferenceResponse.ParsedToolCall] = [], finishReason: InferenceResponse.FinishReason = .completed, usage: TokenUsage? = nil)` |
-
-### Core/CallableAgent.swift
-
-| Line | Kind | Access | Name | Signature |
-|------|------|--------|------|-----------|
-| 21 | struct | public | CallableAgent | `public @dynamicCallable struct CallableAgent` |
-| 26 | func | public | CallableAgent.init(_:) | `public init(_ agent: any AgentRuntime)` |
-| 33 | func | public | CallableAgent.dynamicallyCall(withArguments:) | `public func dynamicallyCall(withArguments args: [String]) async throws -> AgentResult` |
-| 41 | func | public | CallableAgent.dynamicallyCall(withKeywordArguments:) | `public func dynamicallyCall(withKeywordArguments args: KeyValuePairs<String, String>) async throws -> AgentResult` |
-| 58 | func | public | AgentRuntime.callAsFunction(_:) | `public func callAsFunction(_ input: String) async throws -> AgentResult` |
 
 ### Core/CircularBuffer.swift
 
@@ -1282,53 +1265,6 @@ Generated from `Sources/Swarm/` on 2026-03-14.
 | 22 | func | public | AnyJSONToolAdapter.init(_:) | `public init(_ tool: T)` |
 | 26 | func | public | AnyJSONToolAdapter.execute(arguments:) | `public func execute(arguments: [String : SendableValue]) async throws -> SendableValue` |
 | 54 | func | public | Tool.asAnyJSONTool() | `public func asAnyJSONTool() -> AnyJSONToolAdapter<Self>` |
-
-### Tools/ToolChainBuilder.swift
-
-| Line | Kind | Access | Name | Signature |
-|------|------|--------|------|-----------|
-| 38 | @resultBuilder | public | ToolChainBuilder | `public @resultBuilder struct ToolChainBuilder` |
-| 40 | func | public | ToolChainBuilder.buildBlock(_:) | `public static func buildBlock(_ steps: any ToolChainStep...) -> [any ToolChainStep]` |
-| 45 | func | public | ToolChainBuilder.buildBlock() | `public static func buildBlock() -> [any ToolChainStep]` |
-| 50 | func | public | ToolChainBuilder.buildBlock(_:) | `public static func buildBlock(_ steps: [any ToolChainStep]...) -> [any ToolChainStep]` |
-| 55 | func | public | ToolChainBuilder.buildOptional(_:) | `public static func buildOptional(_ component: [any ToolChainStep]?) -> [any ToolChainStep]` |
-| 60 | func | public | ToolChainBuilder.buildEither(first:) | `public static func buildEither(first component: [any ToolChainStep]) -> [any ToolChainStep]` |
-| 65 | func | public | ToolChainBuilder.buildEither(second:) | `public static func buildEither(second component: [any ToolChainStep]) -> [any ToolChainStep]` |
-| 70 | func | public | ToolChainBuilder.buildArray(_:) | `public static func buildArray(_ components: [[any ToolChainStep]]) -> [any ToolChainStep]` |
-| 75 | func | public | ToolChainBuilder.buildExpression(_:) | `public static func buildExpression(_ tool: any AnyJSONTool) -> any ToolChainStep` |
-| 80 | func | public | ToolChainBuilder.buildExpression(_:) | `public static func buildExpression<T>(_ tool: T) -> any ToolChainStep where T : Tool` |
-| 85 | func | public | ToolChainBuilder.buildExpression(_:) | `public static func buildExpression(_ step: any ToolChainStep) -> any ToolChainStep` |
-| 90 | func | public | ToolChainBuilder.buildLimitedAvailability(_:) | `public static func buildLimitedAvailability(_ component: [any ToolChainStep]) -> [any ToolChainStep]` |
-| 95 | func | public | ToolChainBuilder.buildFinalResult(_:) | `public static func buildFinalResult(_ component: [any ToolChainStep]) -> [any ToolChainStep]` |
-| 114 | protocol | public | ToolChainStep | `public protocol ToolChainStep : Sendable` |
-| 120 | func | public | ToolChainStep.execute(input:) | `public func execute(input: SendableValue) async throws -> SendableValue` |
-| 135 | func | public | AnyJSONTool.execute(input:) | `public mutating func execute(input: SendableValue) async throws -> SendableValue` |
-| 158 | struct | public | ToolStep | `public struct ToolStep` |
-| 166 | func | public | ToolStep.init(_:) | `public init(_ tool: any AnyJSONTool)` |
-| 184 | func | public | ToolStep.retry(count:delay:) | `public func retry(count: Int, delay: Duration = .seconds(1)) -> ToolStep` |
-| 200 | func | public | ToolStep.timeout(_:) | `public func timeout(_ duration: Duration) -> ToolStep` |
-| 216 | func | public | ToolStep.fallback(to:) | `public func fallback(to tool: any AnyJSONTool) -> ToolStep` |
-| 233 | func | public | ToolStep.execute(input:) | `public func execute(input: SendableValue) async throws -> SendableValue` |
-| 346 | struct | public | ToolTransform | `public struct ToolTransform` |
-| 354 | func | public | ToolTransform.init(_:) | `public init(_ transform: @escaping (SendableValue) async throws -> SendableValue)` |
-| 365 | func | public | ToolTransform.execute(input:) | `public func execute(input: SendableValue) async throws -> SendableValue` |
-| 386 | struct | public | ToolFilter | `public struct ToolFilter` |
-| 396 | func | public | ToolFilter.init(_:defaultValue:) | `public init(_ predicate: @escaping (SendableValue) async throws -> Bool, defaultValue: SendableValue = .null)` |
-| 411 | func | public | ToolFilter.execute(input:) | `public func execute(input: SendableValue) async throws -> SendableValue` |
-| 436 | struct | public | ToolConditional | `public struct ToolConditional` |
-| 447 | func | public | ToolConditional.init(if:then:else:) | `public init(if condition: @escaping (SendableValue) async throws -> Bool, then thenStep: any ToolChainStep, else elseStep: (any ToolChainStep)? = nil)` |
-| 464 | func | public | ToolConditional.execute(input:) | `public func execute(input: SendableValue) async throws -> SendableValue` |
-| 501 | struct | public | ToolChain | `public struct ToolChain` |
-| 509 | func | public | ToolChain.init(_:) | `public init(@ToolChainBuilder _ content: () -> [any ToolChainStep])` |
-| 520 | func | public | ToolChain.execute(with:) | `public func execute(with arguments: [String : SendableValue]) async throws -> SendableValue` |
-| 531 | func | public | ToolChain.execute(query:) | `public func execute(query: String) async throws -> SendableValue` |
-| 540 | func | public | ToolChain.execute(_:) | `public func execute(_ input: SendableValue) async throws -> SendableValue` |
-| 563 | enum | public | ToolChainError | `public enum ToolChainError` |
-| 568 | var | public | ToolChainError.description | `public var description: String { get }` |
-| 581 | var | public | ToolChainError.errorDescription | `public var errorDescription: String? { get }` |
-| 586 | case | public | ToolChainError.timeout(toolName:duration:) | `public case timeout(toolName: String, duration: Duration)` |
-| 589 | case | public | ToolChainError.executionFailed(toolName:reason:) | `public case executionFailed(toolName: String, reason: String)` |
-| 592 | case | public | ToolChainError.emptyChain | `public case emptyChain` |
 
 ### Tools/ToolExecutionResult.swift
 
@@ -2572,7 +2508,7 @@ Generated from `Sources/Swarm/` on 2026-03-14.
 | 55 | func | public | Workflow.timeout(_:) | `public func timeout(_ duration: Duration) -> Workflow` |
 | 61 | func | public | Workflow.observed(by:) | `public func observed(by observer: some AgentObserver) -> Workflow` |
 | 67 | func | public | Workflow.run(_:) | `public func run(_ input: String) async throws -> AgentResult` |
-| 73 | func | public | Workflow.stream(_:) | `public func stream(_ input: String) -> AsyncThrowingStream<AgentEvent, any Error>` |
+| 418 | func | public | Workflow.stream(_:) | `public func stream(_ input: String) -> AsyncThrowingStream<AgentEvent, any Error>` |
 
 ### Workflow/WorkflowCheckpointing.swift
 

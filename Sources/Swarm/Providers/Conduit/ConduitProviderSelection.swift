@@ -406,11 +406,11 @@ extension ConduitProviderSelection: ToolCallStreamingConversationInferenceProvid
 /// let agent = try Agent("...", provider: .anthropic(apiKey: "key"))
 /// ```
 public extension InferenceProvider where Self == ConduitProviderSelection {
-    static func anthropic(apiKey: String, model: String = "claude-sonnet-4-5") -> ConduitProviderSelection {
+    static func anthropic(apiKey: String, model: String = "claude-3-5-sonnet-20241022") -> ConduitProviderSelection {
         ConduitProviderSelection.anthropic(apiKey: apiKey, model: model)
     }
 
-    static func openAI(apiKey: String, model: String = "gpt-4o") -> ConduitProviderSelection {
+    static func openAI(apiKey: String, model: String = "gpt-4o-mini") -> ConduitProviderSelection {
         ConduitProviderSelection.openAI(apiKey: apiKey, model: model)
     }
 
@@ -422,7 +422,7 @@ public extension InferenceProvider where Self == ConduitProviderSelection {
 
     static func openRouter(
         apiKey: String,
-        model: String
+        model: String = "anthropic/claude-3.5-sonnet"
     ) -> ConduitProviderSelection {
         ConduitProviderSelection.openRouter(apiKey: apiKey, model: model)
     }

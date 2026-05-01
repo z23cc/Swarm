@@ -74,6 +74,7 @@ public actor WaxMemory: Memory, MemoryPromptDescriptor, MemorySessionLifecycle {
         guard persistedMessageIDs.contains(message.id) == false else {
             return
         }
+        let addGeneration = generation
 
         var metadata = message.metadata
         metadata["role"] = message.role.rawValue
@@ -83,6 +84,9 @@ public actor WaxMemory: Memory, MemoryPromptDescriptor, MemorySessionLifecycle {
         do {
             try await store.save(message.content, metadata: metadata)
             try await store.flush()
+            guard generation == addGeneration else {
+                return
+            }
             persistedMessages.append(message)
             persistedMessageIDs.insert(message.id)
         } catch {
@@ -105,6 +109,7 @@ public actor WaxMemory: Memory, MemoryPromptDescriptor, MemorySessionLifecycle {
     }
 
     public func clear() async {
+        generation += 1
         do {
             try await store.close()
             try removePersistedStoreIfPresent()
@@ -141,6 +146,7 @@ public actor WaxMemory: Memory, MemoryPromptDescriptor, MemorySessionLifecycle {
     private let embedder: (any WaxVectorSearch.EmbeddingProvider)?
     private var persistedMessages: [MemoryMessage] = []
     private var persistedMessageIDs: Set<UUID> = []
+    private var generation: Int = 0
     private let isoFormatter = ISO8601DateFormatter()
 
     private func removePersistedStoreIfPresent() throws {
@@ -253,7 +259,7 @@ public extension WaxMemory {
 
     static func makeDefaultStoreURL() -> URL {
         let fileManager = FileManager.default
-        let isRunningTests = isRunningUnderTests()
+        let isRunningTests = SwarmRuntimeEnvironment.isRunningTests
         let baseURL = isRunningTests
             ? fileManager.temporaryDirectory
             : (fileManager.urls(
@@ -271,30 +277,5 @@ public extension WaxMemory {
         try? fileManager.createDirectory(at: root, withIntermediateDirectories: true)
         let fileName = isRunningTests ? "wax-memory-\(UUID().uuidString).mv2s" : "wax-memory.mv2s"
         return root.appendingPathComponent(fileName)
-    }
-
-    private static func isRunningUnderTests() -> Bool {
-        let processInfo = ProcessInfo.processInfo
-        let environment = processInfo.environment
-        if environment["XCTestConfigurationFilePath"] != nil ||
-            environment["XCTestSessionIdentifier"] != nil
-        {
-            return true
-        }
-
-        let arguments = processInfo.arguments.joined(separator: " ").lowercased()
-        if arguments.contains("xctest") ||
-            arguments.contains("swiftpm-testing-helper") ||
-            arguments.contains("swift-testing")
-        {
-            return true
-        }
-
-        let bundlePath = Bundle.main.bundlePath.lowercased()
-        if bundlePath.hasSuffix(".xctest") || bundlePath.contains("swiftpm-testing-helper") {
-            return true
-        }
-
-        return NSClassFromString("XCTestCase") != nil
     }
 }

@@ -19,7 +19,7 @@ let workspace = try AgentWorkspace.appDefault()
 let supportAgent = try Agent.spec(
     "support",
     in: workspace,
-    inferenceProvider: .foundationModels
+    inferenceProvider: .foundationModels()
 )
 
 let result = try await supportAgent.run("I need help with a refund.")
@@ -34,7 +34,7 @@ let workspace = try AgentWorkspace.appDefault()
 let agent = try Agent.onDevice(
     "You are a concise on-device assistant.",
     workspace: workspace,
-    inferenceProvider: .foundationModels
+    inferenceProvider: .foundationModels()
 )
 ```
 

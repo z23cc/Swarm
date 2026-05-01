@@ -18,12 +18,13 @@ import Foundation
 /// Agent throws `AgentError.inferenceProviderUnavailable`.
 ///
 /// Provider resolution order is:
-/// 1. An explicit provider passed to `Agent(...)` (including `Agent(_:)`)
-/// 2. A provider set via `.environment(\.inferenceProvider, ...)`
-/// 3. `Swarm.defaultProvider` (set via `Swarm.configure(provider:)`)
-/// 4. `Swarm.cloudProvider` (set via `Swarm.configure(cloudProvider:)`, when tool calling is required)
-/// 5. Apple Foundation Models (on-device), if available, including prompt-based tool emulation
-/// 6. Otherwise, throw `AgentError.inferenceProviderUnavailable`
+/// 1. Apple Foundation Models when `inferencePolicy.privacyRequired` is true
+/// 2. An explicit provider passed to `Agent(...)` (including `Agent(_:)`)
+/// 3. A provider set via `.environment(\.inferenceProvider, ...)`
+/// 4. `Swarm.defaultProvider` (set via `Swarm.configure(provider:)`)
+/// 5. `Swarm.cloudProvider` (set via `Swarm.configure(cloudProvider:)`, when tool calling is required)
+/// 6. Apple Foundation Models (on-device), if available, including prompt-based tool emulation
+/// 7. Otherwise, throw `AgentError.inferenceProviderUnavailable`
 ///
 /// The agent follows a loop-based execution pattern:
 /// 1. Build prompt with system instructions + conversation history
@@ -127,12 +128,13 @@ public struct Agent: AgentRuntime, Sendable {
     /// The inference provider determines which LLM backend the agent uses for generating
     /// responses. If not set, the agent follows a resolution order to find a provider:
     ///
-    /// 1. Explicit provider passed to ``Agent`` initialization
-    /// 2. Provider set via `.environment(\.inferenceProvider, ...)`
-    /// 3. ``Swarm/defaultProvider`` (configured via `Swarm.configure(provider:)`)
-    /// 4. ``Swarm/cloudProvider`` (configured via `Swarm.configure(cloudProvider:)`)
-    /// 5. Apple Foundation Models (on-device), if available
-    /// 6. Throws ``AgentError/inferenceProviderUnavailable``
+    /// 1. Apple Foundation Models when `configuration.inferencePolicy.privacyRequired` is true
+    /// 2. Explicit provider passed to ``Agent`` initialization
+    /// 3. Provider set via `.environment(\.inferenceProvider, ...)`
+    /// 4. ``Swarm/defaultProvider`` (configured via `Swarm.configure(provider:)`)
+    /// 5. ``Swarm/cloudProvider`` (configured via `Swarm.configure(cloudProvider:)`)
+    /// 6. Apple Foundation Models (on-device), if available
+    /// 7. Throws ``AgentError/inferenceProviderUnavailable``
     ///
     /// ## Usage
     /// Set a specific provider when you want this agent to use a different LLM than
@@ -188,11 +190,11 @@ public struct Agent: AgentRuntime, Sendable {
     /// The configuration for the guardrail runner.
     ///
     /// This configuration controls how input and output guardrails are executed,
-    /// including timeout settings and error handling behavior.
+    /// including sequential or parallel execution and error handling behavior.
     ///
     /// ## Default Behavior
     /// If not specified, uses ``GuardrailRunnerConfiguration/default`` which runs
-    /// guardrails with a 30-second timeout and stops on the first failure.
+    /// guardrails sequentially and stops on the first failure.
     ///
     /// See ``GuardrailRunnerConfiguration`` for customization options.
     public private(set) var guardrailRunnerConfiguration: GuardrailRunnerConfiguration
@@ -237,6 +239,7 @@ public struct Agent: AgentRuntime, Sendable {
     ///   - guardrailRunnerConfiguration: Configuration for guardrail runner. Default: .default
     ///   - handoffs: Handoff configurations for multi-agent orchestration. Default: []
     /// - Throws: `ToolRegistryError.duplicateToolName` if duplicate tool names are provided.
+    @_disfavoredOverload
     public init(
         tools: [any AnyJSONTool] = [],
         instructions: String = "",
@@ -361,6 +364,7 @@ public struct Agent: AgentRuntime, Sendable {
     ///   - guardrailRunnerConfiguration: Configuration for guardrail runner. Default: .default
     ///   - handoffAgents: Agents to hand off to, automatically wrapped as handoff configurations.
     /// - Throws: `ToolRegistryError.duplicateToolName` if duplicate tool names are provided.
+    @_disfavoredOverload
     public init(
         tools: [any AnyJSONTool] = [],
         instructions: String = "",
@@ -528,7 +532,7 @@ public struct Agent: AgentRuntime, Sendable {
     /// - Returns: An async stream of agent events.
     public func stream(_ input: String, session: (any Session)? = nil, observer: (any AgentObserver)? = nil) -> AsyncThrowingStream<AgentEvent, Error> {
         let agent = self
-        return StreamHelper.makeTrackedStream { continuation in
+        return StreamHelper.makeTrackedStream(bufferingPolicy: .unbounded) { continuation in
             // Create event bridge observer
             let streamObserver = EventStreamObserver(continuation: continuation)
 
@@ -665,20 +669,20 @@ public struct Agent: AgentRuntime, Sendable {
 
         func install(continuation: CheckedContinuation<T, Error>) {
             lock.lock()
+            defer { lock.unlock() }
             self.continuation = continuation
-            lock.unlock()
         }
 
         func setOperationTask(_ task: Task<Void, Never>) {
             lock.lock()
+            defer { lock.unlock() }
             operationTask = task
-            lock.unlock()
         }
 
         func setTimeoutTask(_ task: Task<Void, Never>) {
             lock.lock()
+            defer { lock.unlock() }
             timeoutTask = task
-            lock.unlock()
         }
 
         func finish(returning value: T) {
@@ -733,12 +737,78 @@ public struct Agent: AgentRuntime, Sendable {
 
     private actor DefaultMemorySessionTracker {
         private var sessionIDs: [ObjectIdentifier: String] = [:]
+        private var activeSessionIDs: [ObjectIdentifier: String] = [:]
+        private var activeCounts: [ObjectIdentifier: Int] = [:]
+        // Waiters are keyed by a per-call UUID so a cancellation can target the
+        // exact parked task without disturbing siblings. `endRun()` resumes any
+        // remaining waiters with success; cancellation resumes the targeted
+        // waiter with `CancellationError` and removes it from the map.
+        private var waiters: [ObjectIdentifier: [UUID: CheckedContinuation<Void, Error>]] = [:]
 
-        func didSwitchSession(for memory: AnyObject, sessionID: String) -> Bool {
-            let key = ObjectIdentifier(memory)
+        func beginRun(for key: ObjectIdentifier, sessionID: String) async throws -> Bool {
+            while let activeSessionID = activeSessionIDs[key],
+                  activeSessionID != sessionID
+            {
+                try Task.checkCancellation()
+                try await waitForSessionRelease(key: key)
+            }
+
+            // Final cancellation check after exiting the wait loop. Closes the
+            // race where `endRun` resumes the continuation just as the parent
+            // task is cancelled — without this, the resumed task would proceed
+            // to claim the slot and trigger memory-clear side effects.
+            try Task.checkCancellation()
+
             let previous = sessionIDs[key]
             sessionIDs[key] = sessionID
+            activeSessionIDs[key] = sessionID
+            activeCounts[key, default: 0] += 1
             return previous != sessionID
+        }
+
+        func endRun(for key: ObjectIdentifier) {
+            let remaining = (activeCounts[key] ?? 1) - 1
+            if remaining > 0 {
+                activeCounts[key] = remaining
+                return
+            }
+
+            activeCounts[key] = nil
+            activeSessionIDs[key] = nil
+            let pendingWaiters = waiters.removeValue(forKey: key) ?? [:]
+            for (_, continuation) in pendingWaiters {
+                continuation.resume()
+            }
+        }
+
+        /// Park the calling task until either the active session releases (success)
+        /// or the calling task is cancelled (throws `CancellationError`). Without
+        /// the cancellation arm, a cancelled task would stay parked until the
+        /// holder of the active session calls `endRun()`, then wake up and claim
+        /// the slot — performing memory clears and other side effects before the
+        /// cancellation surfaces deeper in execution.
+        private func waitForSessionRelease(key: ObjectIdentifier) async throws {
+            let waiterID = UUID()
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+                    waiters[key, default: [:]][waiterID] = continuation
+                }
+            } onCancel: {
+                Task { await self.cancelWaiter(key: key, id: waiterID) }
+            }
+        }
+
+        private func cancelWaiter(key: ObjectIdentifier, id: UUID) {
+            if let continuation = waiters[key]?.removeValue(forKey: id) {
+                if waiters[key]?.isEmpty == true {
+                    waiters[key] = nil
+                }
+                continuation.resume(throwing: CancellationError())
+            }
         }
     }
 
@@ -757,6 +827,7 @@ public struct Agent: AgentRuntime, Sendable {
             ?? (configuration.defaultTracingEnabled ? SwiftLogTracer(minimumLevel: .debug) : nil)
         let activeMemory = resolvedMemory()
         let lifecycleMemory = activeMemory as? any MemorySessionLifecycle
+        var defaultMemoryRunKey: ObjectIdentifier?
 
         if let session,
            let activeMemory,
@@ -764,10 +835,12 @@ public struct Agent: AgentRuntime, Sendable {
         {
             let activeMemoryObject = activeMemory as AnyObject
             let defaultMemoryObject = defaultMemory as AnyObject
-            if activeMemoryObject === defaultMemoryObject,
-               await Self.defaultMemorySessionTracker.didSwitchSession(for: activeMemoryObject, sessionID: session.sessionId)
-            {
-                await activeMemory.clear()
+            if activeMemoryObject === defaultMemoryObject {
+                let memoryKey = ObjectIdentifier(activeMemoryObject)
+                defaultMemoryRunKey = memoryKey
+                if try await Self.defaultMemorySessionTracker.beginRun(for: memoryKey, sessionID: session.sessionId) {
+                    await activeMemory.clear()
+                }
             }
         }
 
@@ -889,6 +962,9 @@ public struct Agent: AgentRuntime, Sendable {
             if let lifecycleMemory {
                 await lifecycleMemory.endMemorySession()
             }
+            if let defaultMemoryRunKey {
+                await Self.defaultMemorySessionTracker.endRun(for: defaultMemoryRunKey)
+            }
             return InternalRunResult(agentResult: result, structuredOutput: toolLoopOutcome.structuredOutput)
         } catch {
             let normalizedError = normalizeCancellation(error)
@@ -898,6 +974,9 @@ public struct Agent: AgentRuntime, Sendable {
             if let lifecycleMemory {
                 await lifecycleMemory.endMemorySession()
             }
+            if let defaultMemoryRunKey {
+                await Self.defaultMemorySessionTracker.endRun(for: defaultMemoryRunKey)
+            }
             throw normalizedError
         }
     }
@@ -905,6 +984,10 @@ public struct Agent: AgentRuntime, Sendable {
     // MARK: - Inference Provider Resolution
 
     private func resolvedInferenceProvider(toolRegistry: ToolRegistry) async throws -> any InferenceProvider {
+        if configuration.inferencePolicy?.privacyRequired == true {
+            return try await resolvedPrivateInferenceProvider()
+        }
+
         // 1. Explicit provider on Agent
         if let inferenceProvider {
             return transformedInferenceProvider(inferenceProvider)
@@ -943,6 +1026,58 @@ public struct Agent: AgentRuntime, Sendable {
         )
     }
 
+    private func resolvedPrivateInferenceProvider() async throws -> any InferenceProvider {
+        if let foundationModelsProvider = DefaultInferenceProviderFactory.makeFoundationModelsProviderIfAvailable() {
+            return transformedInferenceProvider(foundationModelsProvider)
+        }
+
+        if let provider = privateInferenceProvider(inferenceProvider) {
+            return transformedInferenceProvider(provider)
+        }
+
+        if let provider = privateInferenceProvider(AgentEnvironmentValues.current.inferenceProvider) {
+            return transformedInferenceProvider(provider)
+        }
+
+        if let globalProvider = await Swarm.defaultProvider,
+           let provider = privateInferenceProvider(globalProvider)
+        {
+            return transformedInferenceProvider(provider)
+        }
+
+        // Mirror the non-private resolver's cloud-provider fallback: if the operator
+        // configured a privacy-capable provider via `Swarm.configure(cloudProvider: ...)`
+        // (common for tool/handoff flows), honor it. The capability filter in
+        // `privateInferenceProvider(_:)` ensures we only return it if it actually
+        // reports `.privateInference`.
+        if let cloudProvider = await Swarm.cloudProvider,
+           let provider = privateInferenceProvider(cloudProvider)
+        {
+            return transformedInferenceProvider(provider)
+        }
+
+        throw AgentError.inferenceProviderUnavailable(
+            reason: """
+            AgentConfiguration.inferencePolicy.privacyRequired is true, but no private inference provider is available.
+
+            Use Apple Foundation Models on a supported device, or configure a provider that reports \
+            InferenceProviderCapabilities.privateInference.
+            """
+        )
+    }
+
+    private func privateInferenceProvider(_ provider: (any InferenceProvider)?) -> (any InferenceProvider)? {
+        guard let provider else {
+            return nil
+        }
+
+        let capabilities = InferenceProviderCapabilities.resolved(for: provider)
+        guard capabilities.contains(.privateInference) else {
+            return nil
+        }
+        return provider
+    }
+
     private func transformedInferenceProvider(_ provider: any InferenceProvider) -> any InferenceProvider {
         guard let transform = AgentEnvironmentValues.current.inferenceProviderTransform else {
             return provider
@@ -974,7 +1109,16 @@ public struct Agent: AgentRuntime, Sendable {
     }
 
     private static func makeDefaultMemory() throws -> any Memory {
-        try DefaultAgentMemory()
+        if SwarmRuntimeEnvironment.isRunningTests {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("SwarmDefaultMemoryTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            return try DefaultAgentMemory(configuration: DefaultAgentMemory.Configuration(
+                waxStoreURL: root.appendingPathComponent("wax-memory.mv2s")
+            ))
+        }
+        return try DefaultAgentMemory()
     }
 
     private func resolvedToolRegistry() async throws -> ToolRegistry {
@@ -1131,17 +1275,18 @@ public struct Agent: AgentRuntime, Sendable {
         if let mem = activeMemory {
             let contextProfile = configuration.effectiveContextProfile
             let tokenLimit = contextProfile.memoryTokenLimit
-            if let policyAwareMemory = mem as? any MemoryRetrievalPolicyAware {
-                memoryContext = await policyAwareMemory.context(
-                    for: MemoryQuery(
-                        text: input,
-                        tokenLimit: tokenLimit,
-                        maxItems: contextProfile.maxRetrievedItems,
-                        maxItemTokens: contextProfile.maxRetrievedItemTokens
+            memoryContext = try await executeWithinRemainingTimeout(startTime: startTime) {
+                if let policyAwareMemory = mem as? any MemoryRetrievalPolicyAware {
+                    return await policyAwareMemory.context(
+                        for: MemoryQuery(
+                            text: input,
+                            tokenLimit: tokenLimit,
+                            maxItems: contextProfile.maxRetrievedItems,
+                            maxItemTokens: contextProfile.maxRetrievedItemTokens
+                        )
                     )
-                )
-            } else {
-                memoryContext = await mem.context(for: input, tokenLimit: tokenLimit)
+                }
+                return await mem.context(for: input, tokenLimit: tokenLimit)
             }
         }
 
@@ -1277,9 +1422,16 @@ public struct Agent: AgentRuntime, Sendable {
                     }
                     return schemas
                 }()
-                let structuredMessages = prompt == rawPrompt
-                    ? conversationHistory.map(\.inferenceMessage)
-                    : nil
+                let providerAcceptsStructuredMessages = provider is any ConversationInferenceProvider
+                let structuredMessages: [InferenceMessage]? = if configuration.effectiveContextProfile.preset == .strict4k {
+                    nil
+                } else if providerAcceptsStructuredMessages {
+                    conversationHistory.map(\.inferenceMessage)
+                } else if prompt == rawPrompt {
+                    conversationHistory.map(\.inferenceMessage)
+                } else {
+                    nil
+                }
 
                 // If no tools defined, generate without tool calling
                 if toolSchemas.isEmpty {
@@ -2153,6 +2305,7 @@ public extension Agent {
         /// - Parameter tools: The tools to use.
         /// - Returns: A new builder with the tools set.
         @discardableResult
+        @available(*, deprecated, message: "Use tools(_:) with typed Tool values or Agent.withTools(@ToolBuilder:) for canonical typed tools.")
         public func tools(_ tools: [any AnyJSONTool]) -> Builder {
             var copy = self
             copy._tools = tools
@@ -2173,6 +2326,7 @@ public extension Agent {
         /// - Parameter tool: The tool to add.
         /// - Returns: A new builder with the tool added.
         @discardableResult
+        @available(*, deprecated, message: "Use addTool(_:) with a typed Tool, or wrap raw tools in a clearly marked advanced adapter.")
         public func addTool(_ tool: some AnyJSONTool) -> Builder {
             var copy = self
             copy._tools.append(tool)
@@ -2183,6 +2337,7 @@ public extension Agent {
         /// - Parameter tool: The tool to add.
         /// - Returns: A new builder with the tool added.
         @discardableResult
+        @available(*, deprecated, message: "Use addTool(_:) with a typed Tool, or wrap raw tools in a clearly marked advanced adapter.")
         public func addTool(_ tool: any AnyJSONTool) -> Builder {
             var copy = self
             copy._tools.append(tool)
@@ -2598,21 +2753,21 @@ public extension Agent {
 
     /// Replaces the tool set with the given array of `any Tool`.
     @discardableResult
-    func withTools(_ tools: [any Tool]) -> Agent {
+    func withTools(_ tools: [any Tool]) throws -> Agent {
         var copy = self
         let bridged = tools.map { bridgeToolToAnyJSON($0) }
+        copy.toolRegistry = try ToolRegistry(tools: bridged)
         copy.tools = bridged
-        copy.toolRegistry = (try? ToolRegistry(tools: bridged)) ?? ToolRegistry()
         return copy
     }
 
     /// Replaces the tool set using a `@ToolBuilder` closure.
     @discardableResult
-    func withTools(@ToolBuilder _ builder: () -> ToolCollection) -> Agent {
+    func withTools(@ToolBuilder _ builder: () -> ToolCollection) throws -> Agent {
         var copy = self
         let storage = builder().storage
+        copy.toolRegistry = try ToolRegistry(tools: storage)
         copy.tools = storage
-        copy.toolRegistry = (try? ToolRegistry(tools: storage)) ?? ToolRegistry()
         return copy
     }
 

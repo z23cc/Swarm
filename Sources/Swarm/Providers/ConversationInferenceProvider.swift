@@ -27,6 +27,9 @@ public struct InferenceProviderCapabilities: OptionSet, Sendable, Hashable {
 
     /// Provider can satisfy structured output requests.
     public static let structuredOutputs = Self(rawValue: 1 << 4)
+
+    /// Provider performs inference locally without sending prompt content to a remote model service.
+    public static let privateInference = Self(rawValue: 1 << 5)
 }
 
 public extension InferenceProviderCapabilities {

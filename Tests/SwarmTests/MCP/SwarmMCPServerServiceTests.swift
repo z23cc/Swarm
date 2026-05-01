@@ -6,6 +6,49 @@ import Testing
 
 @Suite("SwarmMCPServerService")
 struct SwarmMCPServerServiceTests {
+    @Test("Real ToolRegistry adapter lists and calls through server service")
+    func realToolRegistryAdapterListAndCallPath() async throws {
+        let tool = MockTool(
+            name: "registry_echo",
+            description: "Echoes text through the registry",
+            parameters: [
+                ToolParameter(name: "text", description: "Text to echo", type: .string),
+                ToolParameter(name: "uppercase", description: "Uppercase response", type: .bool, isRequired: false),
+            ]
+        ) { arguments in
+            let text = arguments["text"]?.stringValue ?? ""
+            let uppercase = arguments["uppercase"]?.boolValue ?? false
+            return .string(uppercase ? text.uppercased() : text)
+        }
+        let registry = try ToolRegistry(tools: [tool])
+        let adapter = SwarmMCPToolRegistryAdapter(registry: registry)
+        let harness = try await SwarmMCPTestHarness.make(catalog: adapter, executor: adapter)
+        defer {
+            Task { await harness.shutdown() }
+        }
+
+        let listed = try await harness.client.listTools()
+        #expect(listed.tools.map(\.name) == ["registry_echo"])
+
+        guard case let .object(schema) = listed.tools[0].inputSchema,
+              case let .object(properties)? = schema["properties"]
+        else {
+            Issue.record("expected object input schema")
+            return
+        }
+        #expect(properties["text"] != nil)
+        #expect(properties["uppercase"] != nil)
+        #expect(schema["required"] == .array([.string("text")]))
+
+        let result = try await harness.client.callTool(
+            name: "registry_echo",
+            arguments: ["text": .string("hello"), "uppercase": .bool(true)]
+        )
+
+        #expect(result.isError != true)
+        #expect(result.content == [.text("HELLO")])
+    }
+
     @Test("ListTools returns deterministic stable ordering and schemas")
     func listToolsContract() async throws {
         let catalog = SwarmMCPToolCatalogStub(
@@ -66,7 +109,7 @@ struct SwarmMCPServerServiceTests {
         )
 
         #expect(result.isError != true)
-        #expect(result.content == [.text(text: "hello", annotations: nil, _meta: nil)])
+        #expect(result.content == [.text("hello")])
 
         let invocations = await executor.invocationsSnapshot()
         #expect(invocations.count == 1)
@@ -233,7 +276,7 @@ struct SwarmMCPServerServiceTests {
                         arguments: ["value": .int(i)]
                     )
                     guard
-                        case let .text(text: text, annotations: _, _meta: _)? = result.content.first,
+                        case let .text(text)? = result.content.first,
                         let parsed = Int(text)
                     else {
                         throw SwarmMCPServerServiceTestError.unreachable("unexpected content")

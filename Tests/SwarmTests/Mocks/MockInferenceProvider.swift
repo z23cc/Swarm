@@ -145,7 +145,7 @@ public actor MockInferenceProvider: InferenceProvider,
                 let response = try await generate(prompt: prompt, options: options)
                 for char in response {
                     continuation.yield(String(char))
-                    try await Task.sleep(for: .milliseconds(1))
+                    await Task.yield()
                 }
                 continuation.finish()
             } catch {

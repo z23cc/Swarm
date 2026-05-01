@@ -21,15 +21,7 @@ struct ObservedAgent<Wrapped: AgentRuntime>: AgentRuntime {
     }
 
     func run(_ input: String, session: (any Session)?, observer additionalObserver: (any AgentObserver)?) async throws -> AgentResult {
-        await observer.onAgentStart(context: nil, agent: wrapped, input: input)
-        do {
-            let result = try await wrapped.run(input, session: session, observer: additionalObserver)
-            await observer.onAgentEnd(context: nil, agent: wrapped, result: result)
-            return result
-        } catch {
-            await observer.onError(context: nil, agent: wrapped, error: error)
-            throw error
-        }
+        try await wrapped.run(input, session: session, observer: combined(with: additionalObserver))
     }
 
     nonisolated func stream(
@@ -37,7 +29,7 @@ struct ObservedAgent<Wrapped: AgentRuntime>: AgentRuntime {
         session: (any Session)?,
         observer additionalObserver: (any AgentObserver)?
     ) -> AsyncThrowingStream<AgentEvent, Error> {
-        wrapped.stream(input, session: session, observer: additionalObserver)
+        wrapped.stream(input, session: session, observer: combined(with: additionalObserver))
     }
 
     func runWithResponse(
@@ -45,7 +37,14 @@ struct ObservedAgent<Wrapped: AgentRuntime>: AgentRuntime {
         session: (any Session)?,
         observer additionalObserver: (any AgentObserver)?
     ) async throws -> AgentResponse {
-        try await wrapped.runWithResponse(input, session: session, observer: additionalObserver)
+        try await wrapped.runWithResponse(input, session: session, observer: combined(with: additionalObserver))
+    }
+
+    private nonisolated func combined(with additionalObserver: (any AgentObserver)?) -> any AgentObserver {
+        guard let additionalObserver else {
+            return observer
+        }
+        return CompositeObserver(observers: [observer, additionalObserver])
     }
 }
 

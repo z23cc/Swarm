@@ -116,7 +116,7 @@ Please check the relevant option(s):
 - [ ] Mock protocols are used for external dependencies
 
 ### Version Compatibility
-- [ ] My code supports the minimum requirements: iOS 17+, macOS 14+, Swift 6.2
+- [ ] My code supports the minimum requirements: iOS 26+, macOS 26+, tvOS 26+, Swift 6.2
 - [ ] I have not introduced dependencies that break compatibility
 
 ---

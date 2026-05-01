@@ -107,6 +107,7 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
         self.defaultProvider = defaultProvider
         providerDescription = "MultiProvider(default: \(type(of: defaultProvider)))"
         capabilitySnapshot = CapabilitySnapshot(Self.capabilities(for: defaultProvider))
+        providerSnapshot = ProviderSnapshot(defaultProvider)
     }
 
     // MARK: - Provider Registration
@@ -127,6 +128,7 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
         }
         providers[trimmed.lowercased()] = provider
         refreshCapabilitySnapshot()
+        refreshProviderSnapshot()
     }
 
     /// Unregisters a provider for a specific prefix.
@@ -138,6 +140,7 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
         let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         providers.removeValue(forKey: trimmed)
         refreshCapabilitySnapshot()
+        refreshProviderSnapshot()
     }
 
     // MARK: - Model Selection
@@ -155,12 +158,14 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
         let sanitized = String(trimmed.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
         currentModel = String(sanitized.prefix(256))
         refreshCapabilitySnapshot()
+        refreshProviderSnapshot()
     }
 
     /// Clears the current model selection.
     public func clearModel() {
         currentModel = nil
         refreshCapabilitySnapshot()
+        refreshProviderSnapshot()
     }
 
     // MARK: - InferenceProvider Conformance
@@ -183,15 +188,26 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
     ///
     /// Routes the request to the appropriate provider based on the current model's prefix.
     ///
+    /// - Important: The provider used by an in-flight stream is captured at *call time*.
+    ///   Calling ``setModel(_:)`` after this method returns does not redirect existing
+    ///   streams to the new provider — only subsequent calls observe the change. To
+    ///   redirect an in-flight request, cancel the consuming task and start a new stream.
+    ///
     /// - Parameters:
     ///   - prompt: The input prompt.
     ///   - options: Generation options.
     /// - Returns: An async stream of response tokens.
     nonisolated public func stream(prompt: String, options: InferenceOptions) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
+        let provider = providerSnapshot.load()
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await self.performStream(prompt: prompt, options: options, continuation: continuation)
+                    try await Self.performStream(
+                        provider: provider,
+                        prompt: prompt,
+                        options: options,
+                        continuation: continuation
+                    )
                 } catch is CancellationError {
                     continuation.finish(throwing: AgentError.cancelled)
                 } catch {
@@ -287,16 +303,17 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
     /// Capability snapshot for the provider currently selected by `currentModel`.
     private let capabilitySnapshot: CapabilitySnapshot
 
+    /// Provider snapshot for nonisolated stream entry points.
+    private let providerSnapshot: ProviderSnapshot
+
     // MARK: - Private Methods
 
-    /// Performs the streaming operation within actor isolation.
-    private func performStream(
+    private nonisolated static func performStream(
+        provider: any InferenceProvider,
         prompt: String,
         options: InferenceOptions,
         continuation: AsyncThrowingStream<String, Error>.Continuation
     ) async throws {
-        let provider = resolveProvider(for: currentModel)
-
         for try await token in provider.stream(prompt: prompt, options: options) {
             try Task.checkCancellation()
             continuation.yield(token)
@@ -305,13 +322,12 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
         continuation.finish()
     }
 
-    private func performConversationStream(
+    private nonisolated static func performConversationStream(
+        provider: any InferenceProvider,
         messages: [InferenceMessage],
         options: InferenceOptions,
         continuation: AsyncThrowingStream<String, Error>.Continuation
     ) async throws {
-        let provider = resolveProvider(for: currentModel)
-
         let stream: AsyncThrowingStream<String, Error>
         if let conversationProvider = provider as? any StreamingConversationInferenceProvider {
             stream = conversationProvider.stream(messages: messages, options: options)
@@ -327,13 +343,13 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
         continuation.finish()
     }
 
-    private func performToolCallStream(
+    private nonisolated static func performToolCallStream(
+        provider: any InferenceProvider,
         prompt: String,
         tools: [ToolSchema],
         options: InferenceOptions,
         continuation: AsyncThrowingStream<InferenceStreamUpdate, Error>.Continuation
     ) async throws {
-        let provider = resolveProvider(for: currentModel)
         guard let streamingProvider = provider as? any ToolCallStreamingInferenceProvider else {
             throw AgentError.generationFailed(reason: "Resolved provider does not support tool-call streaming")
         }
@@ -346,14 +362,13 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
         continuation.finish()
     }
 
-    private func performConversationToolCallStream(
+    private nonisolated static func performConversationToolCallStream(
+        provider: any InferenceProvider,
         messages: [InferenceMessage],
         tools: [ToolSchema],
         options: InferenceOptions,
         continuation: AsyncThrowingStream<InferenceStreamUpdate, Error>.Continuation
     ) async throws {
-        let provider = resolveProvider(for: currentModel)
-
         let stream: AsyncThrowingStream<InferenceStreamUpdate, Error>
         if let conversationProvider = provider as? any ToolCallStreamingConversationInferenceProvider {
             stream = conversationProvider.streamWithToolCalls(messages: messages, tools: tools, options: options)
@@ -424,6 +439,10 @@ public actor MultiProvider: InferenceProvider, ConversationInferenceProvider, Ca
         capabilitySnapshot.store(Self.capabilities(for: resolveProvider(for: currentModel)))
     }
 
+    private func refreshProviderSnapshot() {
+        providerSnapshot.store(resolveProvider(for: currentModel))
+    }
+
     private nonisolated static func capabilities(for provider: any InferenceProvider) -> InferenceProviderCapabilities {
         var capabilities = InferenceProviderCapabilities.resolved(for: provider)
         capabilities.insert(.conversationMessages)
@@ -436,10 +455,16 @@ extension MultiProvider: StreamingConversationInferenceProvider {
         messages: [InferenceMessage],
         options: InferenceOptions
     ) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
+        let provider = providerSnapshot.load()
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await self.performConversationStream(messages: messages, options: options, continuation: continuation)
+                    try await Self.performConversationStream(
+                        provider: provider,
+                        messages: messages,
+                        options: options,
+                        continuation: continuation
+                    )
                 } catch is CancellationError {
                     continuation.finish(throwing: AgentError.cancelled)
                 } catch {
@@ -460,10 +485,12 @@ extension MultiProvider: ToolCallStreamingInferenceProvider {
         tools: [ToolSchema],
         options: InferenceOptions
     ) -> AsyncThrowingStream<InferenceStreamUpdate, Error> {
-        AsyncThrowingStream { continuation in
+        let provider = providerSnapshot.load()
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await self.performToolCallStream(
+                    try await Self.performToolCallStream(
+                        provider: provider,
                         prompt: prompt,
                         tools: tools,
                         options: options,
@@ -489,10 +516,12 @@ extension MultiProvider: ToolCallStreamingConversationInferenceProvider {
         tools: [ToolSchema],
         options: InferenceOptions
     ) -> AsyncThrowingStream<InferenceStreamUpdate, Error> {
-        AsyncThrowingStream { continuation in
+        let provider = providerSnapshot.load()
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await self.performConversationToolCallStream(
+                    try await Self.performConversationToolCallStream(
+                        provider: provider,
                         messages: messages,
                         tools: tools,
                         options: options,
@@ -536,7 +565,28 @@ private final class CapabilitySnapshot: @unchecked Sendable {
 
     func store(_ newValue: InferenceProviderCapabilities) {
         lock.lock()
+        defer { lock.unlock() }
         value = newValue
-        lock.unlock()
+    }
+}
+
+private final class ProviderSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: any InferenceProvider
+
+    init(_ value: any InferenceProvider) {
+        self.value = value
+    }
+
+    func load() -> any InferenceProvider {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func store(_ newValue: any InferenceProvider) {
+        lock.lock()
+        defer { lock.unlock() }
+        value = newValue
     }
 }

@@ -10,7 +10,7 @@ Add Swarm to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/christopherkarani/Swarm.git", from: "0.5.0")
+    .package(url: "https://github.com/christopherkarani/Swarm.git", from: "0.5.1")
 ],
 targets: [
     .target(name: "YourApp", dependencies: ["Swarm"])
@@ -40,8 +40,8 @@ struct PriceTool {
 let agent = try Agent("Answer finance questions using real data.",
     configuration: .default.name("Analyst"),
     inferenceProvider: .anthropic(key: "sk-..."),
-    memory: .conversation(limit: 50),
-    inputGuardrails: [.maxInput(5000), .inputNotEmpty]
+    memory: .conversation(maxMessages: 50),
+    inputGuardrails: [InputGuard.maxLength(5000), InputGuard.notEmpty()]
 ) {
     PriceTool()
     CalculatorTool()
@@ -137,11 +137,11 @@ Stream `AgentEvent` values in real time -- ideal for live UI:
 ```swift
 for try await event in agent.stream("Tell me about Swift concurrency.") {
     switch event {
-    case .outputToken(let token):
+    case .output(.token(let token)):
         print(token, terminator: "")
-    case .toolCallStarted(let call):
+    case .tool(.started(let call)):
         print("\n[tool: \(call.toolName)]")
-    case .completed(let result):
+    case .lifecycle(.completed(let result)):
         print("\nDone in \(result.duration)")
     default:
         break
@@ -225,7 +225,7 @@ Swarm supports multiple inference providers. Pass via the `inferenceProvider:` i
 
 ```swift
 // On-device (private, no network)
-let agent = try Agent("You are helpful.", inferenceProvider: .foundationModels)
+let agent = try Agent("You are helpful.", inferenceProvider: .foundationModels())
 
 // Anthropic
 let agent = try Agent("You are helpful.", inferenceProvider: .anthropic(key: "sk-..."))
@@ -234,7 +234,7 @@ let agent = try Agent("You are helpful.", inferenceProvider: .anthropic(key: "sk
 let agent = try Agent("You are helpful.", inferenceProvider: .openAI(key: "sk-..."))
 
 // Ollama (local)
-let agent = try Agent("You are helpful.", inferenceProvider: .ollama())
+let agent = try Agent("You are helpful.", inferenceProvider: .ollama(model: "llama3.2"))
 ```
 
 Or using the `.environment()` modifier on any `AgentRuntime`:

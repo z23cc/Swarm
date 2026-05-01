@@ -20,40 +20,32 @@
 /// ```swift
 /// import Swarm
 ///
-/// // Create an agent with tools and an inference provider
-/// let agent = Agent(
-///     tools: [CalculatorTool(), DateTimeTool()],
-///     instructions: "You are a helpful assistant that can perform calculations.",
-///     inferenceProvider: myProvider
-/// )
+/// // Create an agent with instructions, a provider, and a trailing
+/// // @ToolBuilder closure listing the agent's tools.
+/// let agent = try Agent("You are a helpful assistant that can perform calculations.",
+///     inferenceProvider: .anthropic(key: "sk-...")) {
+///     CalculatorTool()
+///     DateTimeTool()
+/// }
 ///
 /// // Run the agent
 /// let result = try await agent.run("What is 25 * 4?")
 /// print(result.output)
-///
-/// // Or use the fluent builder API
-/// let agent2 = Agent.Builder()
-///     .tools([CalculatorTool()])
-///     .instructions("You are a math assistant.")
-///     .inferenceProvider(myProvider)
-///     .build()
 /// ```
 ///
 /// ## Supported Platforms
 ///
-/// - macOS 15.0+
-/// - iOS 17.0+
-/// - watchOS 10.0+
-/// - tvOS 17.0+
-/// - visionOS 1.0+
+/// - macOS 26.0+
+/// - iOS 26.0+
+/// - tvOS 26.0+
 ///
 public enum Swarm {
     /// The current version of the Swarm framework.
-    public static let version = "0.5.2"
+    public static let version = "0.5.1"
 
     /// The minimum macOS platform version required by Swarm.
-    public static let minimumMacOSVersion = "15.0"
+    public static let minimumMacOSVersion = "26.0"
 
     /// The minimum iOS platform version required by Swarm.
-    public static let minimumiOSVersion = "17.0"
+    public static let minimumiOSVersion = "26.0"
 }

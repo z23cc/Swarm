@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import CodeReviewer
 
@@ -31,5 +32,48 @@ struct StreamRendererTests {
         let result = StreamRenderer.format("summary", agent: .synthesizer)
         #expect(result.contains("[Summary]"))
         #expect(result.contains(StreamRenderer.ANSICode.green))
+    }
+}
+
+@Suite("ReviewRequest")
+struct ReviewRequestTests {
+    @Test("parses help flag")
+    func helpFlag() throws {
+        let request = try ReviewRequest(arguments: ["--help"])
+        #expect(request.showHelp)
+        #expect(request.path == nil)
+    }
+
+    @Test("rejects too many arguments")
+    func tooManyArguments() {
+        #expect(throws: CLIError.tooManyArguments) {
+            _ = try ReviewRequest(arguments: ["one.swift", "two.swift"])
+        }
+    }
+
+    @Test("loads file input")
+    func loadsFileInput() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("swift")
+        try "let value = 1\n".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let request = try ReviewRequest(arguments: [url.path])
+
+        #expect(request.sourceDescription == url.path)
+        #expect(try request.loadInput() == "let value = 1\n")
+    }
+}
+
+@Suite("ReviewReport")
+struct ReviewReportTests {
+    @Test("counts lines and characters")
+    func countsLinesAndCharacters() {
+        let report = ReviewReport(input: "one\ntwo\n", sourceDescription: "stdin")
+
+        #expect(report.lineCount == 3)
+        #expect(report.characterCount == 8)
+        #expect(report.focusAreas.count == 4)
     }
 }

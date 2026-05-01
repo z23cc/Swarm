@@ -74,7 +74,7 @@ private struct MLXPromptProvider: Sendable, InferenceProvider {
         }
 
         if let parallelToolCalls = options.parallelToolCalls {
-            updated = updated.parallelToolCalls(parallelToolCalls)
+            updated = updated.parallelToolCalls(ParallelToolMode(parallelToolCalls))
         }
 
         if let structuredOutput = options.structuredOutput {

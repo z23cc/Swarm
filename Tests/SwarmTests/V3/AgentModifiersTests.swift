@@ -134,8 +134,16 @@ struct AgentModifiersTests {
             PongTool()
         }
         let replacementTools: [any Tool] = [PingTool()]
-        let modified = agent.withTools(replacementTools)
+        let modified = try agent.withTools(replacementTools)
         #expect(modified.tools.count == 1)
+    }
+
+    @Test("tools modifier with array throws duplicate tool names")
+    func toolsArrayModifierThrowsDuplicateNames() throws {
+        let tools: [any Tool] = [PingTool(), PingTool()]
+        #expect(throws: ToolRegistryError.self) {
+            _ = try Agent("test").withTools(tools)
+        }
     }
 
     @Test("tools modifier with empty array clears tools")
@@ -180,6 +188,16 @@ struct AgentModifiersTests {
         }
         .withTools { }
         #expect(agent.tools.isEmpty)
+    }
+
+    @Test("tools builder modifier throws duplicate tool names")
+    func toolsBuilderModifierThrowsDuplicateNames() throws {
+        #expect(throws: ToolRegistryError.self) {
+            _ = try Agent("test").withTools {
+                PingTool()
+                PingTool()
+            }
+        }
     }
 
     // MARK: - Configuration Modifier

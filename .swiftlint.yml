@@ -1,0 +1,39 @@
+included:
+  - Sources
+  - Tests
+
+excluded:
+  - .build
+  - .swiftpm
+  - .worktrees
+  - Packages
+  - node_modules
+  - docs/.vitepress
+
+disabled_rules:
+  - cyclomatic_complexity
+  - file_length
+  - for_where
+  - force_try
+  - function_body_length
+  - function_parameter_count
+  - identifier_name
+  - implicit_optional_initialization
+  - large_tuple
+  - leading_whitespace
+  - line_length
+  - nesting
+  - opening_brace
+  - optional_data_string_conversion
+  - orphaned_doc_comment
+  - static_over_final_class
+  - todo
+  - trailing_comma
+  - trailing_newline
+  - trailing_whitespace
+  - type_body_length
+  - type_name
+  - unneeded_synthesized_initializer
+  - vertical_whitespace
+
+strict: true

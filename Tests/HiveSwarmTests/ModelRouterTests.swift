@@ -6,7 +6,7 @@
 import Foundation
 import Testing
 import HiveCore
-@testable import Swarm
+@_spi(ColonyInternal) @testable import Swarm
 
 @Suite("Model Router Wiring")
 struct ModelRouterTests {
@@ -179,7 +179,7 @@ private actor CapturingModelClient: HiveModelClient {
         for chunk in await getChunks() {
             if case let .final(response) = chunk { return response }
         }
-        throw HiveRuntimeError.modelStreamInvalid("Missing final chunk.")
+        throw SwarmRuntimeError.modelStreamInvalid("Missing final chunk.")
     }
 
     nonisolated func stream(_ request: HiveChatRequest) -> AsyncThrowingStream<HiveChatStreamChunk, Error> {

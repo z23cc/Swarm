@@ -84,6 +84,12 @@ public actor SlidingWindowMemory: Memory {
             currentTokenCount -= removedTokens
         }
 
+        if currentTokenCount > maxTokens, let latest = messages.last {
+            let truncated = truncate(latest, toFit: maxTokens)
+            messages[messages.count - 1] = truncated
+            currentTokenCount = tokenEstimator.estimateTokens(for: truncated.formattedContent)
+        }
+
         // Periodic recalibration to prevent token count drift
         operationsSinceRecalibration += 1
         if operationsSinceRecalibration >= recalibrationInterval {
@@ -105,6 +111,39 @@ public actor SlidingWindowMemory: Memory {
         messages.removeAll()
         currentTokenCount = 0
         operationsSinceRecalibration = 0
+    }
+
+    private func truncate(_ message: MemoryMessage, toFit tokenLimit: Int) -> MemoryMessage {
+        var lowerBound = 0
+        var upperBound = message.content.count
+        var bestContent = ""
+
+        while lowerBound <= upperBound {
+            let midpoint = (lowerBound + upperBound) / 2
+            let candidateContent = String(message.content.prefix(midpoint))
+            let candidate = MemoryMessage(
+                id: message.id,
+                role: message.role,
+                content: candidateContent,
+                timestamp: message.timestamp,
+                metadata: message.metadata
+            )
+
+            if tokenEstimator.estimateTokens(for: candidate.formattedContent) <= tokenLimit {
+                bestContent = candidateContent
+                lowerBound = midpoint + 1
+            } else {
+                upperBound = midpoint - 1
+            }
+        }
+
+        return MemoryMessage(
+            id: message.id,
+            role: message.role,
+            content: bestContent,
+            timestamp: message.timestamp,
+            metadata: message.metadata
+        )
     }
 
     // MARK: Private

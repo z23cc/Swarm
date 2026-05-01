@@ -288,6 +288,28 @@ public struct ToolBuilder {
         ToolCollection(storage: [bridgeToolToAnyJSON(expression)])
     }
 
+    /// Wraps a closure-based ``FunctionTool`` into a `ToolCollection`.
+    public static func buildExpression(_ expression: FunctionTool) -> ToolCollection {
+        ToolCollection(storage: [expression])
+    }
+
+    #if canImport(Darwin)
+        /// Wraps the built-in calculator tool into a `ToolCollection`.
+        public static func buildExpression(_ expression: CalculatorTool) -> ToolCollection {
+            ToolCollection(storage: [expression])
+        }
+    #endif
+
+    /// Wraps the built-in date/time tool into a `ToolCollection`.
+    public static func buildExpression(_ expression: DateTimeTool) -> ToolCollection {
+        ToolCollection(storage: [expression])
+    }
+
+    /// Wraps the built-in string utility tool into a `ToolCollection`.
+    public static func buildExpression(_ expression: StringTool) -> ToolCollection {
+        ToolCollection(storage: [expression])
+    }
+
     /// Wraps an internal `AnyJSONTool` value into a `ToolCollection`.
     ///
     /// Used by framework-internal code that already holds `any AnyJSONTool`

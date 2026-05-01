@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 import HiveCore
-@testable import Swarm
+@_spi(ColonyInternal) @testable import Swarm
 import Testing
 
 // MARK: - HiveAgentsTests
@@ -166,8 +166,8 @@ struct HiveAgentsTests {
             _ = try await handle.outcome.value
         }
 
-        guard let runtimeError = thrown as? HiveRuntimeError else {
-            Issue.record("Expected HiveRuntimeError, got \(String(describing: thrown))")
+        guard let runtimeError = thrown as? SwarmRuntimeError else {
+            Issue.record("Expected SwarmRuntimeError, got \(String(describing: thrown))")
             return
         }
         switch runtimeError {
@@ -1244,7 +1244,7 @@ private struct ScriptedModelClient: HiveModelClient {
         for chunk in chunks {
             if case let .final(response) = chunk { return response }
         }
-        throw HiveRuntimeError.modelStreamInvalid("Missing final chunk.")
+        throw SwarmRuntimeError.modelStreamInvalid("Missing final chunk.")
     }
 
     func stream(_: HiveChatRequest) -> AsyncThrowingStream<HiveChatStreamChunk, Error> {
@@ -1303,7 +1303,7 @@ private struct CapturingModelClient: HiveModelClient {
                 return response
             }
         }
-        throw HiveRuntimeError.modelStreamInvalid("Missing final chunk.")
+        throw SwarmRuntimeError.modelStreamInvalid("Missing final chunk.")
     }
 
     func stream(_ request: HiveChatRequest) -> AsyncThrowingStream<HiveChatStreamChunk, Error> {

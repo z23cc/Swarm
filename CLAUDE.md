@@ -21,7 +21,7 @@ built around:
 - **Guardrails / Resilience / Observability** — first-class concerns, not
   bolt-ons.
 - **Providers** — Foundation Models, Anthropic, OpenAI, Ollama, Gemini,
-  OpenRouter, MLX, all routed through [Conduit](https://github.com/christopherkarani/Conduit).
+  MiniMax, OpenRouter, MLX, all routed through [Conduit](https://github.com/christopherkarani/Conduit).
 - **MCP** — Model Context Protocol client and server support.
 
 The package uses Swift 6.2 with `StrictConcurrency` enabled across all targets.
@@ -101,7 +101,7 @@ fail-closed contract.
 
 ### Demo / benchmark executables
 
-The `SwarmDemo`, `ContextBenchmark`, and `SwarmMCPServerDemo` executables are
+The `SwarmDemo` and `SwarmMCPServerDemo` executables are
 **opt-in** — they only build when `SWARM_INCLUDE_DEMO=1` is set:
 
 ```bash
@@ -126,9 +126,10 @@ smoke-mode environment variables.
 
 ### Lint / format
 
-CI runs `swiftlint lint --strict` and `swiftformat --lint .` on macOS. The
-config files (`.swiftlint.yml`, `.swiftformat`) are intentionally
-**git-ignored** — contributors keep them locally. If you change Swift files,
+CI runs SwiftLint and SwiftFormat on macOS using the tracked root configs:
+`.swiftlint.yml` and `.swiftformat`. Both commands are scoped to
+`Sources` and `Tests` so ignored worktrees, dependency checkouts, generated
+docs, and Node artifacts do not affect results. If you change Swift files,
 match the surrounding style and assume both linters will run in CI.
 
 To format using the SwiftFormat package plugin (per README):
@@ -186,8 +187,11 @@ swift package plugin --allow-writing-to-package-directory swiftformat
 
 ### Memory & Workspace
 
-- `MemoryOption` is the user-facing entry point: `.conversation(limit:)`,
-  `.slidingWindow(count:)`, `.summary(summarizer:)`, `.vector(embeddingProvider:)`.
+- `Memory` factory methods are the user-facing entry point:
+  `.conversation(maxMessages:)`, `.slidingWindow(maxTokens:)`,
+  `.summary(configuration:summarizer:)`, `.hybrid(configuration:summarizer:)`,
+  `.persistent(backend:conversationId:maxMessages:)`, and
+  `.vector(embeddingProvider:similarityThreshold:maxResults:)`.
 - `AgentWorkspace` (in `Sources/Swarm/Workspace/`) is the on-device workspace
   layout backed by `AGENTS.md` + `.swarm/agents/<id>.md` + `.swarm/skills/` +
   `.swarm/memory/`. **Do not confuse the runtime `AGENTS.md` (workspace
@@ -244,8 +248,8 @@ otherwise want to create or check in. **Do not work around these.**
 
 - `.claude/`, `.mcp.json`, `.agent_context.md`, `AGENTS.md` — local AI tooling
   config.
-- `.swiftformat`, `.swiftlint.yml`, `.swift-version` — contributors keep these
-  locally; CI uses pinned tool versions.
+- `.swift-version` — contributors keep this locally; CI selects Swift through
+  the workflow environment.
 - `Package.resolved` — library, not application.
 - `docs/plans/`, `docs/prompts/`, `docs/work-packages/`, `docs/validation/`,
   `tasks/`, `scripts/`, `IMPLEMENTATION_PLAN.md`,
@@ -258,7 +262,7 @@ un-ignored so this guidance can live in-repo.
 
 ## Public API Stability
 
-The framework is at `0.5.0` (`Sources/Swarm/Swarm.swift`) and treats its public
+The framework is at `0.5.1` (`Sources/Swarm/Swarm.swift`) and treats its public
 surface as semi-stable. The audit documents in `docs/reference/` (especially
 `api-catalog.md`, `front-facing-api.md`, and `docc-audit-report.md`) define the
 sanctioned surface. Prefer:

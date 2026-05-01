@@ -5,7 +5,7 @@
 
 import Foundation
 import HiveCore
-@testable import Swarm
+@_spi(ColonyInternal) @testable import Swarm
 import Testing
 
 @Suite("GraphAgent streaming event bridge")
@@ -270,7 +270,7 @@ private struct StreamingScriptedModelClient: HiveModelClient {
         for chunk in chunks {
             if case let .final(response) = chunk { return response }
         }
-        throw HiveRuntimeError.modelStreamInvalid("Missing final chunk.")
+        throw SwarmRuntimeError.modelStreamInvalid("Missing final chunk.")
     }
 
     func stream(_ request: HiveChatRequest) -> AsyncThrowingStream<HiveChatStreamChunk, Error> {

@@ -109,9 +109,8 @@ public actor MCPClient {
         servers[server.name] = server
 
         // Invalidate both caches since we have a new server
-        cacheValid = false
-        resourceCacheValid = false
-        resourceCacheTimestamp = nil
+        invalidateToolCacheState()
+        invalidateResourceCacheState()
     }
 
     /// Removes and closes an MCP server by name.
@@ -144,9 +143,8 @@ public actor MCPClient {
         servers.removeValue(forKey: name)
 
         // Invalidate both caches
-        cacheValid = false
-        resourceCacheValid = false
-        resourceCacheTimestamp = nil
+        invalidateToolCacheState()
+        invalidateResourceCacheState()
     }
 
     // MARK: - Tool Discovery
@@ -177,17 +175,24 @@ public actor MCPClient {
             return Array(toolCache.values)
         }
 
-        // If a refresh is already in progress, wait for it instead of starting a new one.
-        // This prevents concurrent cache rebuilds (race condition).
+        // Dedup: if a refresh is already in progress, await its result instead of
+        // launching a duplicate. Actor isolation guarantees that all callers in this
+        // window see the same `refreshTask`. The `toolCacheGeneration` check guards
+        // the case where `invalidateToolCacheState()` was called while we were
+        // awaiting — if so, the awaited result is stale and we recurse to refresh.
         if let ongoing = refreshTask {
-            return try await ongoing.value
+            let observedGeneration = toolCacheGeneration
+            let result = try await ongoing.value
+            if toolCacheGeneration != observedGeneration {
+                return try await getAllTools()
+            }
+            return result
         }
+
+        let refreshGeneration = toolCacheGeneration
 
         // Start a new refresh task
         let task = Task<[any AnyJSONTool], Error> {
-            // Clear the cache
-            toolCache.removeAll()
-
             // Collect tools from all servers first so we can resolve name collisions.
             var discoveredTools: [DiscoveredTool] = []
             for serverName in servers.keys.sorted() {
@@ -220,6 +225,7 @@ public actor MCPClient {
 
             // Build deterministic, unique client-visible names.
             var usedNames: Set<String> = []
+            var discoveredCache: [String: any AnyJSONTool] = [:]
             for discovered in discoveredTools {
                 let baseName = discovered.schema.name
                 let hasCollision = (baseNameCounts[baseName] ?? 0) > 1
@@ -239,13 +245,16 @@ public actor MCPClient {
                     displayName: visibleName,
                     serverToolName: baseName
                 )
-                toolCache[visibleName] = bridgedTool
+                discoveredCache[visibleName] = bridgedTool
             }
 
-            // Mark cache as valid
-            cacheValid = true
+            // Commit only if no invalidation happened while this refresh was in flight.
+            if toolCacheGeneration == refreshGeneration {
+                toolCache = discoveredCache
+                cacheValid = true
+            }
 
-            return Array(toolCache.values)
+            return Array(discoveredCache.values)
         }
 
         // Store the task for deduplication
@@ -254,6 +263,9 @@ public actor MCPClient {
         do {
             let result = try await task.value
             refreshTask = nil
+            if toolCacheGeneration != refreshGeneration {
+                return try await getAllTools()
+            }
             return result
         } catch {
             refreshTask = nil
@@ -277,7 +289,7 @@ public actor MCPClient {
     /// print("Found \(tools.count) tools after refresh")
     /// ```
     public func refreshTools() async throws -> [any AnyJSONTool] {
-        cacheValid = false
+        invalidateToolCacheState()
         return try await getAllTools()
     }
 
@@ -293,7 +305,7 @@ public actor MCPClient {
     /// let tools = try await client.getAllTools()
     /// ```
     public func invalidateCache() {
-        cacheValid = false
+        invalidateToolCacheState()
     }
 
     // MARK: - Resource Access
@@ -361,12 +373,19 @@ public actor MCPClient {
         // If a refresh is already in progress, wait for it instead of starting a new one.
         // This prevents concurrent cache rebuilds (race condition).
         if let ongoing = resourceRefreshTask {
-            return try await ongoing.value
+            let observedGeneration = resourceCacheGeneration
+            let result = try await ongoing.value
+            if resourceCacheGeneration != observedGeneration {
+                return try await getAllResources()
+            }
+            return result
         }
+
+        let refreshGeneration = resourceCacheGeneration
 
         // Start a new refresh task
         let task = Task<[MCPResource], Error> {
-            try await refreshResourcesInternal()
+            try await refreshResourcesInternal(refreshGeneration: refreshGeneration)
         }
 
         // Store the task for deduplication
@@ -375,6 +394,9 @@ public actor MCPClient {
         do {
             let result = try await task.value
             resourceRefreshTask = nil
+            if resourceCacheGeneration != refreshGeneration {
+                return try await getAllResources()
+            }
             return result
         } catch {
             resourceRefreshTask = nil
@@ -401,8 +423,7 @@ public actor MCPClient {
     /// ## Note
     /// This method resets the cache timestamp, starting a new TTL period.
     public func refreshResources() async throws -> [MCPResource] {
-        resourceCacheValid = false
-        resourceCacheTimestamp = nil
+        invalidateResourceCacheState()
         return try await getAllResources()
     }
 
@@ -418,13 +439,8 @@ public actor MCPClient {
     /// let resources = try await client.getAllResources()
     /// ```
     ///
-    /// ## Note
-    /// This method does not cancel any in-flight refresh operations.
-    /// If a refresh is in progress, the cache will be marked invalid but
-    /// the ongoing refresh will complete normally.
     public func invalidateResourceCache() {
-        resourceCacheValid = false
-        resourceCacheTimestamp = nil
+        invalidateResourceCacheState()
     }
 
     /// Sets the time-to-live (TTL) for the resource cache.
@@ -570,7 +586,7 @@ public actor MCPClient {
         // Always clear state regardless of errors
         servers.removeAll()
         toolCache.removeAll()
-        cacheValid = false
+        invalidateToolCacheState()
         resourceCache.removeAll()
         resourceCacheValid = false
         resourceCacheTimestamp = nil
@@ -604,6 +620,9 @@ public actor MCPClient {
     /// Whether the tool cache is currently valid.
     private var cacheValid: Bool = false
 
+    /// Monotonic version used to discard refreshes that raced with invalidation.
+    private var toolCacheGeneration = 0
+
     /// Ongoing tool refresh task to prevent concurrent cache rebuilds.
     /// Used for request deduplication - if a refresh is in progress,
     /// subsequent calls wait for the same task instead of starting new ones.
@@ -621,6 +640,9 @@ public actor MCPClient {
     /// Used in conjunction with `resourceCacheTTL` to determine cache expiry.
     private var resourceCacheTimestamp: Date?
 
+    /// Monotonic version used to discard resource refreshes that raced with invalidation.
+    private var resourceCacheGeneration = 0
+
     /// Time-to-live (TTL) for the resource cache in seconds.
     /// Resources are cached for this duration before automatic invalidation.
     /// Default: 60 seconds (resources change more frequently than tools).
@@ -634,13 +656,24 @@ public actor MCPClient {
     /// subsequent calls wait for the same task instead of starting new ones.
     private var resourceRefreshTask: Task<[MCPResource], Error>?
 
+    private func invalidateToolCacheState() {
+        toolCacheGeneration += 1
+        cacheValid = false
+        refreshTask = nil
+    }
+
+    private func invalidateResourceCacheState() {
+        resourceCacheGeneration += 1
+        resourceCacheValid = false
+        resourceCacheTimestamp = nil
+        resourceRefreshTask = nil
+    }
+
     /// Internal method that performs the actual resource discovery and cache update.
     /// This is called by both `getAllResources()` and `refreshResources()`.
-    private func refreshResourcesInternal() async throws -> [MCPResource] {
-        // Clear the cache
-        resourceCache.removeAll()
-
+    private func refreshResourcesInternal(refreshGeneration: Int? = nil) async throws -> [MCPResource] {
         // Collect resources from all servers
+        var discoveredResources: [String: MCPResource] = [:]
         for (_, server) in servers {
             let capabilities = await server.capabilities
             guard capabilities.resources else {
@@ -650,15 +683,17 @@ public actor MCPClient {
             let resources = try await server.listResources()
             for resource in resources {
                 // Use URI as the key since it uniquely identifies the resource
-                resourceCache[resource.uri] = resource
+                discoveredResources[resource.uri] = resource
             }
         }
 
-        // Mark cache as valid and set timestamp
-        resourceCacheValid = true
-        resourceCacheTimestamp = Date()
+        if refreshGeneration == nil || resourceCacheGeneration == refreshGeneration {
+            resourceCache = discoveredResources
+            resourceCacheValid = true
+            resourceCacheTimestamp = Date()
+        }
 
-        return Array(resourceCache.values)
+        return Array(discoveredResources.values)
     }
 
     private struct DiscoveredTool {

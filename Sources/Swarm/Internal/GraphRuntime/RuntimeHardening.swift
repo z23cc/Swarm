@@ -600,24 +600,8 @@ enum HiveDeterminism {
                     "channels": canonicalChannelValueSummary(channelValues)
                 ]
             )
-        case let .modelInvocationStarted(model):
-            ("modelInvocationStarted", ["model": model])
-        case let .modelToken(text):
-            ("modelToken", ["text": text])
-        case .modelInvocationFinished:
-            ("modelInvocationFinished", [:])
-        case let .toolInvocationStarted(name):
-            ("toolInvocationStarted", ["name": name])
-        case let .toolInvocationFinished(name, success):
-            ("toolInvocationFinished", ["name": name, "success": String(success)])
-        case let .streamBackpressure(droppedModelTokenEvents, droppedDebugEvents):
-            (
-                "streamBackpressure",
-                [
-                    "droppedModelTokenEvents": String(droppedModelTokenEvents),
-                    "droppedDebugEvents": String(droppedDebugEvents)
-                ]
-            )
+        case let .streamBackpressure(droppedDebugEvents):
+            ("streamBackpressure", ["droppedDebugEvents": String(droppedDebugEvents)])
         case let .customDebug(name):
             ("customDebug", ["name": name])
         }
@@ -723,11 +707,11 @@ extension GraphRunController {
     func validateRunOptions(_ options: HiveRunOptions) throws {
         let environment = runtime.environmentSnapshot
 
-        if environment.modelRouter == nil, environment.model == nil {
-            throw HiveRuntimeError.modelClientMissing
+        if environment.context.modelRouter == nil, environment.context.model == nil {
+            throw SwarmRuntimeError.modelClientMissing
         }
-        if environment.tools == nil {
-            throw HiveRuntimeError.toolRegistryMissing
+        if environment.context.tools == nil {
+            throw SwarmRuntimeError.toolRegistryMissing
         }
 
         guard options.maxSteps >= 0 else {

@@ -1,6 +1,6 @@
 import Foundation
 import HiveCore
-@testable import Swarm
+@_spi(ColonyInternal) @testable import Swarm
 import Testing
 
 @Suite("Membrane Hive Checkpoint Integration")

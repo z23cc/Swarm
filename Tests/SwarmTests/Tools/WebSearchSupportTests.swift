@@ -83,6 +83,61 @@ struct WebSearchSupportTests {
         #expect(stored.document.summary.contains("Parameters"))
     }
 
+    @Test("Web content extractor can skip raw byte persistence")
+    func extractorCanSkipRawPersistence() throws {
+        let rawRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("swarm-web-extractor-skip-raw-tests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rawRoot.deletingLastPathComponent()) }
+
+        let url = try #require(URL(string: "https://docs.example.com/private"))
+        let payload = WebFetchPayload(
+            requestedURL: url,
+            finalURL: url,
+            statusCode: 200,
+            contentType: "text/plain; charset=utf-8",
+            data: Data("sensitive raw body".utf8),
+            etag: nil,
+            lastModified: nil,
+            notModified: false
+        )
+
+        let stored = try WebContentExtractor().extract(
+            payload: payload,
+            goal: nil,
+            existingArtifactID: nil,
+            rawRootURL: nil
+        )
+
+        #expect(stored.artifact.rawArtifactRef.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: rawRoot.path))
+    }
+
+    @Test("Safe web fetcher rejects alternate loopback address forms before fetching")
+    func fetcherRejectsAlternateLoopbackAddressForms() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("swarm-web-fetcher-tests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+
+        let configuration = WebSearchTool.Configuration(
+            apiKey: nil,
+            persistFetchedArtifacts: false,
+            storeURL: root,
+            enabled: true
+        )
+        let fetcher = SafeWebFetcher(configuration: configuration)
+        let decimalLoopback = try #require(URL(string: "http://2130706433/secret"))
+
+        await #expect(throws: AgentError.self) {
+            _ = try await fetcher.fetch(
+                url: decimalLoopback,
+                conditionalEtag: nil,
+                conditionalLastModified: nil
+            )
+        }
+    }
+
     @Test("Merged hits prefer close cached results")
     func mergeHitsPrefersUsefulCachedHits() {
         let cached = WebSearchHit(
