@@ -739,16 +739,25 @@ public struct Agent: AgentRuntime, Sendable {
         private var sessionIDs: [ObjectIdentifier: String] = [:]
         private var activeSessionIDs: [ObjectIdentifier: String] = [:]
         private var activeCounts: [ObjectIdentifier: Int] = [:]
-        private var waiters: [ObjectIdentifier: [CheckedContinuation<Void, Never>]] = [:]
+        // Waiters are keyed by a per-call UUID so a cancellation can target the
+        // exact parked task without disturbing siblings. `endRun()` resumes any
+        // remaining waiters with success; cancellation resumes the targeted
+        // waiter with `CancellationError` and removes it from the map.
+        private var waiters: [ObjectIdentifier: [UUID: CheckedContinuation<Void, Error>]] = [:]
 
-        func beginRun(for key: ObjectIdentifier, sessionID: String) async -> Bool {
+        func beginRun(for key: ObjectIdentifier, sessionID: String) async throws -> Bool {
             while let activeSessionID = activeSessionIDs[key],
                   activeSessionID != sessionID
             {
-                await withCheckedContinuation { continuation in
-                    waiters[key, default: []].append(continuation)
-                }
+                try Task.checkCancellation()
+                try await waitForSessionRelease(key: key)
             }
+
+            // Final cancellation check after exiting the wait loop. Closes the
+            // race where `endRun` resumes the continuation just as the parent
+            // task is cancelled — without this, the resumed task would proceed
+            // to claim the slot and trigger memory-clear side effects.
+            try Task.checkCancellation()
 
             let previous = sessionIDs[key]
             sessionIDs[key] = sessionID
@@ -766,9 +775,39 @@ public struct Agent: AgentRuntime, Sendable {
 
             activeCounts[key] = nil
             activeSessionIDs[key] = nil
-            let pendingWaiters = waiters.removeValue(forKey: key) ?? []
-            for waiter in pendingWaiters {
-                waiter.resume()
+            let pendingWaiters = waiters.removeValue(forKey: key) ?? [:]
+            for (_, continuation) in pendingWaiters {
+                continuation.resume()
+            }
+        }
+
+        /// Park the calling task until either the active session releases (success)
+        /// or the calling task is cancelled (throws `CancellationError`). Without
+        /// the cancellation arm, a cancelled task would stay parked until the
+        /// holder of the active session calls `endRun()`, then wake up and claim
+        /// the slot — performing memory clears and other side effects before the
+        /// cancellation surfaces deeper in execution.
+        private func waitForSessionRelease(key: ObjectIdentifier) async throws {
+            let waiterID = UUID()
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+                    waiters[key, default: [:]][waiterID] = continuation
+                }
+            } onCancel: {
+                Task { await self.cancelWaiter(key: key, id: waiterID) }
+            }
+        }
+
+        private func cancelWaiter(key: ObjectIdentifier, id: UUID) {
+            if let continuation = waiters[key]?.removeValue(forKey: id) {
+                if waiters[key]?.isEmpty == true {
+                    waiters[key] = nil
+                }
+                continuation.resume(throwing: CancellationError())
             }
         }
     }
@@ -799,7 +838,7 @@ public struct Agent: AgentRuntime, Sendable {
             if activeMemoryObject === defaultMemoryObject {
                 let memoryKey = ObjectIdentifier(activeMemoryObject)
                 defaultMemoryRunKey = memoryKey
-                if await Self.defaultMemorySessionTracker.beginRun(for: memoryKey, sessionID: session.sessionId) {
+                if try await Self.defaultMemorySessionTracker.beginRun(for: memoryKey, sessionID: session.sessionId) {
                     await activeMemory.clear()
                 }
             }
@@ -1002,6 +1041,17 @@ public struct Agent: AgentRuntime, Sendable {
 
         if let globalProvider = await Swarm.defaultProvider,
            let provider = privateInferenceProvider(globalProvider)
+        {
+            return provider
+        }
+
+        // Mirror the non-private resolver's cloud-provider fallback: if the operator
+        // configured a privacy-capable provider via `Swarm.configure(cloudProvider: ...)`
+        // (common for tool/handoff flows), honor it. The capability filter in
+        // `privateInferenceProvider(_:)` ensures we only return it if it actually
+        // reports `.privateInference`.
+        if let cloudProvider = await Swarm.cloudProvider,
+           let provider = privateInferenceProvider(cloudProvider)
         {
             return provider
         }
