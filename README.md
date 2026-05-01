@@ -352,6 +352,7 @@ Foundation Models require iOS 26 / macOS 26. Cloud providers work on any Swift 6
 | | |
 |---|---|
 | [Getting Started](docs/guide/getting-started.md) | Installation, first agent, workflows |
+| [OpenTelemetry Tracing](docs/guide/opentelemetry-tracing.md) | Export agent and LLM spans, with optional trace header injection for provider HTTP requests |
 | [API Reference](docs/reference/api-catalog.md) | Every type, protocol, and API |
 | [Front-Facing API](docs/reference/front-facing-api.md) | Public API surface |
 | [Why Swarm?](docs/guide/why-swarm.md) | Design philosophy and architecture |

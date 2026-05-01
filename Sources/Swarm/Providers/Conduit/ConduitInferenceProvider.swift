@@ -10,6 +10,7 @@ struct ConduitInferenceProvider<Provider: TextGenerator>: InferenceProvider,
     ToolCallStreamingInferenceProvider,
     CapabilityReportingInferenceProvider,
     ConversationInferenceProvider,
+    InferenceProviderMetadata,
     StructuredOutputInferenceProvider,
     StructuredOutputConversationInferenceProvider,
     StreamingConversationInferenceProvider,
@@ -19,12 +20,14 @@ struct ConduitInferenceProvider<Provider: TextGenerator>: InferenceProvider,
         provider: Provider,
         model: Provider.ModelID,
         baseConfig: GenerateConfig = .default,
-        supportsStreamingToolCalls: Bool = true
+        supportsStreamingToolCalls: Bool = true,
+        metadata: InferenceProviderMetadataSnapshot? = nil
     ) {
         self.provider = provider
         self.model = model
         self.baseConfig = baseConfig
         self.supportsStreamingToolCalls = supportsStreamingToolCalls
+        self.metadata = metadata
     }
 
     func generate(prompt: String, options: InferenceOptions) async throws -> String {
@@ -361,6 +364,19 @@ struct ConduitInferenceProvider<Provider: TextGenerator>: InferenceProvider,
     private let model: Provider.ModelID
     private let baseConfig: GenerateConfig
     private let supportsStreamingToolCalls: Bool
+    private let metadata: InferenceProviderMetadataSnapshot?
+
+    var providerName: String? {
+        metadata?.providerName
+    }
+
+    var modelName: String? {
+        metadata?.modelName
+    }
+
+    var endpointURL: URL? {
+        metadata?.endpointURL
+    }
 
     private static func conduitMessages(from messages: [InferenceMessage]) throws -> [Message] {
         let toolNamesByCallID = Dictionary(
