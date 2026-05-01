@@ -445,7 +445,13 @@ public extension AsyncThrowingStream where Element == AgentEvent, Failure == Err
         let processingTaskRef = TimeoutTaskRef()
 
         let timeoutTask = Task {
-            try? await Task.sleep(for: duration)
+            // Use `try` (not `try?`): if `processingTask` cancels this task because
+            // the upstream completed naturally first, the cancellation must propagate
+            // out of this Task body so the timeout side-effects (cancel processing,
+            // finish with timeout error) DO NOT run. With `try?`, cancellation would
+            // be swallowed and the body would race to emit a false-timeout error
+            // ahead of the upstream's natural `finish()`.
+            try await Task.sleep(for: duration)
             processingTaskRef.task?.cancel()
             continuation.finish(throwing: AgentError.timeout(duration: duration))
         }
