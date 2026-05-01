@@ -69,14 +69,15 @@ public actor DefaultAgentMemory: Memory, MemoryPromptDescriptor, MemorySessionLi
             return ""
         }
 
-        async let primaryContext = contextMemory.context(
+        async let primaryContextTask = contextMemory.context(
             for: query,
             tokenLimit: max(1, Int(Double(tokenLimit) * 0.7))
         )
-        async let secondaryContext = waxContext(for: query, tokenLimit: max(1, tokenLimit / 3))
+        let secondaryContextStr = await waxContext(for: query, tokenLimit: max(1, tokenLimit / 3))
+        let primaryContextStr = await primaryContextTask
 
-        let primary = (await primaryContext).trimmingCharacters(in: .whitespacesAndNewlines)
-        let secondary = (await secondaryContext).trimmingCharacters(in: .whitespacesAndNewlines)
+        let primary = primaryContextStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secondary = secondaryContextStr.trimmingCharacters(in: .whitespacesAndNewlines)
         return await formatContext(primary: primary, secondary: secondary, tokenLimit: tokenLimit)
     }
 
