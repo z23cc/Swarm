@@ -126,6 +126,41 @@ struct MembraneIntegrationTests {
         #expect(result.metadata["membrane.fallback.error"]?.stringValue?.contains("forced membrane failure") == true)
     }
 
+    @Test("Pointerized structured tool output resolves as JSON")
+    func pointerizedStructuredToolOutputResolvesAsJSON() async throws {
+        let provider = PointerResolvingInferenceProvider()
+        let agent = try Agent(
+            tools: [StructuredPayloadTool()],
+            instructions: "Call the structured payload tool, resolve the pointer, then finish.",
+            configuration: AgentConfiguration(
+                name: "membrane-structured-tool-output",
+                maxIterations: 4,
+                defaultTracingEnabled: false
+            ),
+            inferenceProvider: provider
+        ).environment(
+            \.membrane,
+            MembraneEnvironment(
+                isEnabled: true,
+                configuration: MembraneFeatureConfiguration(
+                    jitMinToolCount: 12,
+                    defaultJITLoadCount: 2,
+                    pointerThresholdBytes: 32,
+                    pointerSummaryMaxChars: 80
+                )
+            )
+        )
+
+        let result = try await agent.run("exercise pointerized structured output")
+
+        let resolvedPointerOutput = try #require(result.toolResults.last?.output.stringValue)
+        let data = Data(resolvedPointerOutput.utf8)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let dictionary = try #require(object)
+        #expect(dictionary["message"] as? String == "quoted \"value\" with newline\nsecond line")
+        #expect(dictionary["count"] as? Int == 42)
+    }
+
     @Test("Default adapter checkpoint state roundtrips loaded tools")
     func defaultAdapterCheckpointRoundtrip() async throws {
         let adapter = DefaultMembraneAgentAdapter(
@@ -273,6 +308,101 @@ private struct MembraneTestTool: AnyJSONTool, Sendable {
 
     func execute(arguments _: [String: SendableValue]) async throws -> SendableValue {
         .string("ok")
+    }
+}
+
+private struct StructuredPayloadTool: AnyJSONTool, Sendable {
+    let name = "structured_payload"
+    let description = "Returns structured JSON-compatible data large enough to pointerize."
+    let parameters: [ToolParameter] = []
+
+    func execute(arguments _: [String: SendableValue]) async throws -> SendableValue {
+        .dictionary([
+            "message": .string("quoted \"value\" with newline\nsecond line"),
+            "count": .int(42),
+            "items": .array((0 ..< 20).map { .string("item-\($0)") })
+        ])
+    }
+}
+
+private actor PointerResolvingInferenceProvider: InferenceProvider, ConversationInferenceProvider {
+    private var turn = 0
+
+    func generate(prompt _: String, options _: InferenceOptions) async throws -> String {
+        "done"
+    }
+
+    nonisolated func stream(prompt _: String, options _: InferenceOptions) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield("done")
+            continuation.finish()
+        }
+    }
+
+    func generateWithToolCalls(
+        prompt _: String,
+        tools _: [ToolSchema],
+        options _: InferenceOptions
+    ) async throws -> InferenceResponse {
+        try nextResponse(from: "")
+    }
+
+    func generate(messages: [InferenceMessage], options _: InferenceOptions) async throws -> String {
+        InferenceMessage.flattenPrompt(messages)
+    }
+
+    nonisolated func stream(
+        messages: [InferenceMessage],
+        options _: InferenceOptions
+    ) -> AsyncThrowingStream<String, Error> {
+        let text = InferenceMessage.flattenPrompt(messages)
+        return AsyncThrowingStream { continuation in
+            continuation.yield(text)
+            continuation.finish()
+        }
+    }
+
+    func generateWithToolCalls(
+        messages: [InferenceMessage],
+        tools _: [ToolSchema],
+        options _: InferenceOptions
+    ) async throws -> InferenceResponse {
+        try nextResponse(from: InferenceMessage.flattenPrompt(messages))
+    }
+
+    private func nextResponse(from prompt: String) throws -> InferenceResponse {
+        defer { turn += 1 }
+        switch turn {
+        case 0:
+            return InferenceResponse(
+                toolCalls: [
+                    .init(id: "call-structured", name: "structured_payload", arguments: [:])
+                ],
+                finishReason: .toolCall
+            )
+        case 1:
+            let pointerID = try Self.pointerID(from: prompt)
+            return InferenceResponse(
+                toolCalls: [
+                    .init(
+                        id: "call-resolve",
+                        name: MembraneInternalToolName.resolvePointer,
+                        arguments: ["pointer_id": .string(pointerID)]
+                    )
+                ],
+                finishReason: .toolCall
+            )
+        default:
+            return InferenceResponse(content: "done", finishReason: .completed)
+        }
+    }
+
+    private static func pointerID(from prompt: String) throws -> String {
+        guard let range = prompt.range(of: #"ptr_[0-9a-f]{12}"#, options: .regularExpression) else {
+            struct MissingPointer: Error {}
+            throw MissingPointer()
+        }
+        return String(prompt[range])
     }
 }
 

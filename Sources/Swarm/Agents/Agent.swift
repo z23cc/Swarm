@@ -1885,7 +1885,7 @@ public struct Agent: AgentRuntime, Sendable {
         }
 
         if outcome.result.isSuccess {
-            var toolOutputText = outcome.result.output.stringValue ?? outcome.result.output.description
+            var toolOutputText = Self.toolOutputText(for: outcome.result.output)
             if let membraneAdapter {
                 do {
                     let currentToolOutput = toolOutputText
@@ -1946,6 +1946,25 @@ public struct Agent: AgentRuntime, Sendable {
                 throw AgentError.toolExecutionFailed(toolName: parsedCall.name, underlyingError: errorMessage)
             }
         }
+    }
+
+    private static func toolOutputText(for output: SendableValue) -> String {
+        if let string = output.stringValue {
+            return string
+        }
+
+        do {
+            let object = output.toJSONObject()
+            let data = try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys, .fragmentsAllowed]
+            )
+            if let text = String(data: data, encoding: .utf8) {
+                return text
+            }
+        } catch {}
+
+        return output.description
     }
 
     // MARK: - Handoff Tool Schema Integration
