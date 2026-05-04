@@ -35,7 +35,7 @@ var packageDependencies: [Package.Dependency] = [
     .package(url: "https://github.com/open-telemetry/opentelemetry-swift-core.git", from: "2.3.0"),
     .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.13.2"),
     // Production graph must resolve to the published tag set that is known to build together.
-    .package(url: "https://github.com/christopherkarani/Wax.git", exact: "0.1.19"),
+    .package(url: "https://github.com/christopherkarani/Wax.git", exact: "0.1.20"),
     .package(
         url: "https://github.com/christopherkarani/Conduit",
         exact: "0.3.14",
