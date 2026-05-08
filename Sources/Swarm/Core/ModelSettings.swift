@@ -355,7 +355,8 @@ public extension ModelSettings {
             promptCacheRetention: other.promptCacheRetention ?? promptCacheRetention,
             repetitionPenalty: other.repetitionPenalty ?? repetitionPenalty,
             minP: other.minP ?? minP,
-            providerSettings: mergeProviderSettings(with: other.providerSettings)
+            providerSettings: mergeProviderSettings(with: other.providerSettings),
+            reasoning: other.reasoning ?? reasoning
         )
 
         // Validate the merged settings to catch invalid combinations
