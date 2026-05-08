@@ -23,6 +23,12 @@ public enum ReasoningEffort: String, Sendable, Hashable, Codable, CaseIterable {
     case low
     /// Very brief reasoning.
     case minimal
+    /// No reasoning — standard generation. Use this to explicitly
+    /// disable reasoning when the base/provider config has it enabled;
+    /// `nil` means "preserve base config", which can't override an
+    /// inherited reasoning setting. Mirrors Conduit's `ReasoningEffort.none`,
+    /// which serializes as `effort: "none"` on the wire.
+    case none
 }
 
 /// Configuration for extended thinking / reasoning mode.
