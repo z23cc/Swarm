@@ -155,6 +155,14 @@ public struct ModelSettings: Sendable, Equatable {
     /// ```
     public var providerSettings: [String: SendableValue]?
 
+    /// Configuration for extended thinking / reasoning mode.
+    ///
+    /// Used by OpenAI o-series, OpenRouter `:thinking`, and similar providers.
+    /// Without this, reasoning models may run unbounded — see one-fhx for the
+    /// production failure mode (gpt-5 returning response_bytes=0 after 800-1000
+    /// reasoning tokens).
+    public var reasoning: ReasoningConfig?
+
     // MARK: - Initialization
 
     /// Creates a new model settings configuration.
@@ -177,7 +185,8 @@ public struct ModelSettings: Sendable, Equatable {
         promptCacheRetention: CacheRetention? = nil,
         repetitionPenalty: Double? = nil,
         minP: Double? = nil,
-        providerSettings: [String: SendableValue]? = nil
+        providerSettings: [String: SendableValue]? = nil,
+        reasoning: ReasoningConfig? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -195,6 +204,7 @@ public struct ModelSettings: Sendable, Equatable {
         self.repetitionPenalty = repetitionPenalty
         self.minP = minP
         self.providerSettings = providerSettings
+        self.reasoning = reasoning
     }
 }
 
