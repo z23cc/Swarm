@@ -161,6 +161,84 @@ struct MembraneIntegrationTests {
         #expect(dictionary["count"] as? Int == 42)
     }
 
+    // MARK: - one-8h1.10 characterization (OneWorkspace investigation)
+    //
+    // Manual gate transcript 2026-05-08T05:13Z saw `Tool 'Add_Tools' failed:
+    // ... (Swarm.MembraneAgentAdapterError error 1.)`. These tests prove
+    // what `error 1` actually means and how it's triggered, so callers
+    // (and forks consuming this adapter) can map the error correctly
+    // without a magic-number lookup.
+
+    @Test("Add_Tools called with missing tool_names argument throws invalidInternalToolArguments (`error 1`)")
+    func addToolsMissingArgsThrowsErrorCase1() async throws {
+        let adapter = DefaultMembraneAgentAdapter(
+            configuration: MembraneFeatureConfiguration(jitMinToolCount: 2, defaultJITLoadCount: 1)
+        )
+        await #expect(throws: MembraneAgentAdapterError.self) {
+            _ = try await adapter.handleInternalToolCall(
+                name: MembraneInternalToolName.addTools,
+                arguments: [:]  // No tool_names key at all.
+            )
+        }
+        // Empty array: same outcome (parseToolNames returns []).
+        await #expect(throws: MembraneAgentAdapterError.self) {
+            _ = try await adapter.handleInternalToolCall(
+                name: MembraneInternalToolName.addTools,
+                arguments: ["tool_names": .array([])]
+            )
+        }
+    }
+
+    @Test("membrane_load_tool_schema with missing or empty tool_name throws invalidInternalToolArguments")
+    func loadToolSchemaMissingArgThrowsErrorCase1() async throws {
+        let adapter = DefaultMembraneAgentAdapter(
+            configuration: MembraneFeatureConfiguration(jitMinToolCount: 2, defaultJITLoadCount: 1)
+        )
+        await #expect(throws: MembraneAgentAdapterError.self) {
+            _ = try await adapter.handleInternalToolCall(
+                name: MembraneInternalToolName.loadToolSchema,
+                arguments: [:]
+            )
+        }
+        await #expect(throws: MembraneAgentAdapterError.self) {
+            _ = try await adapter.handleInternalToolCall(
+                name: MembraneInternalToolName.loadToolSchema,
+                arguments: ["tool_name": .string("")]
+            )
+        }
+    }
+
+    @Test("MembraneAgentAdapterError.invalidInternalToolArguments is the second case (NSError code 1)")
+    func errorCaseOrdinalIsOne() {
+        // Swift bridges enum-with-payload to NSError using the case
+        // declaration order. unsupportedInternalTool is case 0,
+        // invalidInternalToolArguments is case 1. The 'error 1' string
+        // in production transcripts maps to invalidInternalToolArguments.
+        let error = MembraneAgentAdapterError.invalidInternalToolArguments(
+            name: "Add_Tools",
+            reason: "Missing required array argument: tool_names"
+        )
+        let nsError = error as NSError
+        #expect(nsError.code == 1)
+        // unsupportedInternalTool is the other case at code 0.
+        let other = MembraneAgentAdapterError.unsupportedInternalTool(name: "x")
+        let otherNS = other as NSError
+        #expect(otherNS.code == 0)
+    }
+
+    @Test("Add_Tools with valid tool_names succeeds and returns confirmation message")
+    func addToolsValidArgsSucceeds() async throws {
+        let adapter = DefaultMembraneAgentAdapter(
+            configuration: MembraneFeatureConfiguration(jitMinToolCount: 2, defaultJITLoadCount: 1)
+        )
+        let result = try await adapter.handleInternalToolCall(
+            name: MembraneInternalToolName.addTools,
+            arguments: ["tool_names": .array([.string("listDatabases"), .string("getSchemaModel")])]
+        )
+        #expect(result?.contains("listDatabases") == true)
+        #expect(result?.contains("getSchemaModel") == true)
+    }
+
     @Test("Default adapter checkpoint state roundtrips loaded tools")
     func defaultAdapterCheckpointRoundtrip() async throws {
         let adapter = DefaultMembraneAgentAdapter(
