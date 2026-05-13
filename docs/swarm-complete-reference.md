@@ -1725,23 +1725,6 @@ public actor SwiftDataBackend: PersistentMemoryBackend {
 }
 ```
 
-### `CompositeMemory` — Combine Multiple Memories
-
-```swift
-public actor CompositeMemory: Memory {
-    public init(
-        memories: [any Memory],
-        mergeStrategy: MemoryMergeStrategy = .interleave
-    )
-}
-
-public enum MemoryMergeStrategy: Sendable {
-    case interleave         // Merge by timestamp
-    case sequential         // Concatenate in order
-    case prioritized        // Use priority hints
-}
-```
-
 ### `HybridMemory` — Conversation + Vector
 
 ```swift
@@ -1839,20 +1822,6 @@ public struct WordBasedTokenEstimator: TokenEstimator, Sendable {
 
 public struct AveragingTokenEstimator: TokenEstimator, Sendable {
     public init(estimators: [any TokenEstimator])
-}
-```
-
-### Memory Builder
-
-```swift
-public struct MemoryBuilder {
-    public static func conversation(maxTokens: Int = 4096) -> ConversationMemory
-    public static func slidingWindow(size: Int = 20) -> SlidingWindowMemory
-    public static func vector(provider: any EmbeddingProvider) -> VectorMemory
-    public static func summary(summarizer: any Summarizer) -> SummaryMemory
-    public static func persistent(backend: any PersistentMemoryBackend) -> PersistentMemory
-    public static func composite(_ memories: [any Memory]) -> CompositeMemory
-    public static func hybrid(conversation: ConversationMemory, vector: VectorMemory) -> HybridMemory
 }
 ```
 
@@ -3208,15 +3177,15 @@ public struct AutoApproveHandler: HumanApprovalHandler { ... }
 
 ### Actors (54)
 
-`Agent`, `AgentContext`, `AgentRouter`, `AgentSequence`, `AnyMemory`, `AnyTracer`, `BlueprintAgent`, `BufferedTracer`, `ChannelBagStorage`, `ChatAgent`, `CircuitBreaker`, `CircuitBreakerRegistry`, `CompositeMemory`, `CompositeTracer`, `ConditionalFallback`, `ConsoleTracer`, `ConversationMemory`, `FileSystemWorkflowCheckpointStore`, `GuardrailRunner`, `HandoffCoordinator`, `HTTPMCPServer`, `HybridMemory`, `InferenceProviderSummarizer`, `InMemoryBackend`, `InMemorySession`, `InMemoryWorkflowCheckpointStore`, `LoopAgent`, `MCPClient`, `MCPToolBridge`, `MetricsCollector`, `MultiProvider`, `NoOpTracer`, `OpenRouterProvider`, `ParallelComposition`, `ParallelGroup`, `ParallelToolExecutor`, `PerformanceTracker`, `PersistentMemory`, `Agent`, `PrettyConsoleTracer`, `RateLimiter`, `Agent`, `Workflow advanced fallback`, `ResponseTracker`, `SequentialChain`, `SlidingWindowMemory`, `SummaryMemory`, `SupervisorAgent`, `SwarmRunner`, `SwiftLogTracer`, `ToolRegistry`, `TraceContext`, `VectorMemory`, `WaxMemory`
+`Agent`, `AgentContext`, `AgentRouter`, `AgentSequence`, `AnyMemory`, `AnyTracer`, `BlueprintAgent`, `BufferedTracer`, `ChannelBagStorage`, `ChatAgent`, `CircuitBreaker`, `CircuitBreakerRegistry`, `CompositeTracer`, `ConditionalFallback`, `ConsoleTracer`, `ConversationMemory`, `FileSystemWorkflowCheckpointStore`, `GuardrailRunner`, `HandoffCoordinator`, `HTTPMCPServer`, `HybridMemory`, `InferenceProviderSummarizer`, `InMemoryBackend`, `InMemorySession`, `InMemoryWorkflowCheckpointStore`, `LoopAgent`, `MCPClient`, `MCPToolBridge`, `MetricsCollector`, `MultiProvider`, `NoOpTracer`, `OpenRouterProvider`, `ParallelComposition`, `ParallelGroup`, `ParallelToolExecutor`, `PerformanceTracker`, `PersistentMemory`, `Agent`, `PrettyConsoleTracer`, `RateLimiter`, `Agent`, `Workflow advanced fallback`, `ResponseTracker`, `SequentialChain`, `SlidingWindowMemory`, `SummaryMemory`, `SupervisorAgent`, `SwarmRunner`, `SwiftLogTracer`, `ToolRegistry`, `TraceContext`, `VectorMemory`, `WaxMemory`
 
 ### Structs (170+)
 
-`AgentConfiguration`, `AgentDescription`, `AgentEnvironment`, `AgentResponse`, `AgentResult`, `AgentStep`, `AgentTool`, `AnyAgent`, `AnyHandoffConfiguration`, `AnyJSONToolAdapter`, `AnyTool`, `ApprovalRequest`, `AutoApproveHandler`, `AveragingTokenEstimator`, `Branch`, `CallableAgent`, `CharacterBasedTokenEstimator`, `CircularBuffer`, `ClosureInputGuardrail`, `ClosureOutputGuardrail`, `ClosureToolInputGuardrail`, `ClosureToolOutputGuardrail`, `CompositeRunHooks`, `ConduitInferenceProvider`, `ContextBucketCaps`, `ContextBudget`, `ContextKey`, `ContextProfile`, `ConversationMemoryDiagnostics`, `DAG`, `DAGNode`, `DateTimeTool`, `EnvironmentAgent`, `ErrorInfo`, `ExecutionPlan`, `ExecutionResult`, `FallbackChain`, `FallbackStep`, `FallbackSummarizer`, `FunctionTool`, `Guard`, `GuardrailExecutionResult`, `GuardrailResult`, `GuardrailRunnerConfiguration`, `HandoffBuilder`, `HandoffConfiguration`, `HandoffInputData`, `HandoffRequest`, `HandoffResult`, `HumanApproval`, `HybridMemoryDiagnostics`, `InferenceOptions`, `InferencePolicy`, `InferenceResponse`, `InputGuard`, `InputGuardrailBuilder`, `Interrupt`, `JSONMetricsReporter`, `KeywordRoutingStrategy`, `LLMRoutingStrategy`, `LoggingModifier`, `LoggingRunHooks`, `Loop`, `MCPCapabilities`, `MCPError`, `MCPErrorObject`, `MCPRequest`, `MCPResource`, `MCPResourceContent`, `MCPResponse`, `MemoryBuilder`, `MemoryMessage`, `MetricsSnapshot`, `MockEmbeddingProvider`, `ModelSettings`, `ModifiedStep`, `NamedModifier`, `NoOpStep`, `OllamaSettings`, `OpenRouterConfiguration`, `OpenRouterModel`, `OpenRouterProviderPreferences`, `OpenRouterRetryStrategy`, `OpenRouterRouting`, `Orchestration`, `OrchestrationChannel`, `OrchestrationGroup`, `OrchestrationStepContext`, `OutputGuard`, `OutputGuardrailBuilder`, `OutputTransformer`, `Parallel`, `ParallelItem`, `PartialToolCallUpdate`, `PerformanceMetrics`, `Pipeline`, `PlanStep`, `PromptString`, `RepeatWhile`, `ResumeToken`, `RetryModifier`, `RetryPolicy`, `Route`, `RouteBranch`, `RouteCondition`, `Router`, `RoutingDecision`, `SendableErrorWrapper`, `Sequential`, `SessionMetadata`, `SlidingWindowDiagnostics`, `SourceLocation`, `Statistics`, `StepError`, `StringTool`, `SummaryMemoryDiagnostics`, `SwarmAgentProfile`, `SwarmEmbeddingProviderAdapter`, `SwarmMCPToolRegistryAdapter`, `SwarmResponse`, `SwarmStreamChunk`, `SwarmToolCallDelta`, `SwarmToolRegistry`, `TimeoutModifier`, `TokenUsage`, `ToolArguments`, `ToolCall`, `ToolCallRecord`, `ToolChain`, `ToolConditional`, `ToolExecutionEngine`, `ToolExecutionResult`, `ToolFilter`, `ToolGuardrailData`, `ToolInputGuardrailBuilder`, `ToolOutputGuardrailBuilder`, `ToolParameter`, `ToolResult`, `ToolSchema`, `ToolStep`, `ToolTransform`, `TraceEvent`, `TraceSpan`, `TracingHelper`, `Transform`, `TruncatingSummarizer`, `VectorMemoryBuilder`, `VectorMemoryDiagnostics`, `WaxEmbeddingProviderAdapter`, `WaxIntegration`, `WordBasedTokenEstimator`, `WorkflowCheckpointState`, `WorkflowResumeHandle`
+`AgentConfiguration`, `AgentDescription`, `AgentEnvironment`, `AgentResponse`, `AgentResult`, `AgentStep`, `AgentTool`, `AnyAgent`, `AnyHandoffConfiguration`, `AnyJSONToolAdapter`, `AnyTool`, `ApprovalRequest`, `AutoApproveHandler`, `AveragingTokenEstimator`, `Branch`, `CallableAgent`, `CharacterBasedTokenEstimator`, `CircularBuffer`, `ClosureInputGuardrail`, `ClosureOutputGuardrail`, `ClosureToolInputGuardrail`, `ClosureToolOutputGuardrail`, `CompositeRunHooks`, `ConduitInferenceProvider`, `ContextBucketCaps`, `ContextBudget`, `ContextKey`, `ContextProfile`, `ConversationMemoryDiagnostics`, `DAG`, `DAGNode`, `DateTimeTool`, `EnvironmentAgent`, `ErrorInfo`, `ExecutionPlan`, `ExecutionResult`, `FallbackChain`, `FallbackStep`, `FallbackSummarizer`, `FunctionTool`, `Guard`, `GuardrailExecutionResult`, `GuardrailResult`, `GuardrailRunnerConfiguration`, `HandoffBuilder`, `HandoffConfiguration`, `HandoffInputData`, `HandoffRequest`, `HandoffResult`, `HumanApproval`, `HybridMemoryDiagnostics`, `InferenceOptions`, `InferencePolicy`, `InferenceResponse`, `InputGuard`, `InputGuardrailBuilder`, `Interrupt`, `JSONMetricsReporter`, `KeywordRoutingStrategy`, `LLMRoutingStrategy`, `LoggingModifier`, `LoggingRunHooks`, `Loop`, `MCPCapabilities`, `MCPError`, `MCPErrorObject`, `MCPRequest`, `MCPResource`, `MCPResourceContent`, `MCPResponse`, `MemoryMessage`, `MetricsSnapshot`, `MockEmbeddingProvider`, `ModelSettings`, `ModifiedStep`, `NamedModifier`, `NoOpStep`, `OllamaSettings`, `OpenRouterConfiguration`, `OpenRouterModel`, `OpenRouterProviderPreferences`, `OpenRouterRetryStrategy`, `OpenRouterRouting`, `Orchestration`, `OrchestrationChannel`, `OrchestrationGroup`, `OrchestrationStepContext`, `OutputGuard`, `OutputGuardrailBuilder`, `OutputTransformer`, `Parallel`, `ParallelItem`, `PartialToolCallUpdate`, `PerformanceMetrics`, `Pipeline`, `PlanStep`, `PromptString`, `RepeatWhile`, `ResumeToken`, `RetryModifier`, `RetryPolicy`, `Route`, `RouteBranch`, `RouteCondition`, `Router`, `RoutingDecision`, `SendableErrorWrapper`, `Sequential`, `SessionMetadata`, `SlidingWindowDiagnostics`, `SourceLocation`, `Statistics`, `StepError`, `StringTool`, `SummaryMemoryDiagnostics`, `SwarmAgentProfile`, `SwarmEmbeddingProviderAdapter`, `SwarmMCPToolRegistryAdapter`, `SwarmResponse`, `SwarmStreamChunk`, `SwarmToolCallDelta`, `SwarmToolRegistry`, `TimeoutModifier`, `TokenUsage`, `ToolArguments`, `ToolCall`, `ToolCallRecord`, `ToolChain`, `ToolConditional`, `ToolExecutionEngine`, `ToolExecutionResult`, `ToolFilter`, `ToolGuardrailData`, `ToolInputGuardrailBuilder`, `ToolOutputGuardrailBuilder`, `ToolParameter`, `ToolResult`, `ToolSchema`, `ToolStep`, `ToolTransform`, `TraceEvent`, `TraceSpan`, `TracingHelper`, `Transform`, `TruncatingSummarizer`, `VectorMemoryDiagnostics`, `WaxEmbeddingProviderAdapter`, `WaxIntegration`, `WordBasedTokenEstimator`, `WorkflowCheckpointState`, `WorkflowResumeHandle`
 
 ### Enums (60+)
 
-`AgentContextKey`, `AgentEnvironmentValues`, `AgentError`, `AgentEvent`, `AgentEventStream`, `ApprovalResponse`, `BackoffStrategy`, `BuiltInTools`, `CacheRetention`, `ConduitProviderSelection`, `ContextMode`, `EmbeddingError`, `EmbeddingUtils`, `EventKind`, `EventLevel`, `GuardPhase`, `GuardrailError`, `GuardrailType`, `InferenceStreamEvent`, `InferenceStreamUpdate`, `LLM`, `Log`, `MCPServerState`, `MemoryMergeStrategy`, `MemoryOperation`, `MemoryPriority`, `MemoryPriorityHint`, `MergeErrorStrategy`, `MergeStrategies`, `MetricsReporterError`, `ModelSettingsValidationError`, `MultiProviderError`, `OpenRouterProviderError`, `OpenRouterRoutingStrategy`, `OpenRouterToolChoice`, `OrchestrationError`, `OrchestrationValidationError`, `ParallelErrorHandling`, `ParallelExecutionErrorStrategy`, `ParallelMergeStrategy`, `PersistentMemoryError`, `PipelineError`, `ResilienceError`, `RetrievalStrategy`, `RetryPolicyBridge`, `SendableValue`, `SessionError`, `SpanStatus`, `StepStatus`, `StreamHelper`, `SummarizerError`, `Swarm`, `SwarmError`, `SwarmToolRegistryError`, `ToolChainError`, `ToolChoice`, `TruncationStrategy`, `TypedParallel`, `VectorMemoryError`, `Verbosity`, `WorkflowCheckpointPolicy`, `WorkflowExecutionOutcome`, `WorkflowInterruptReason`
+`AgentContextKey`, `AgentEnvironmentValues`, `AgentError`, `AgentEvent`, `AgentEventStream`, `ApprovalResponse`, `BackoffStrategy`, `BuiltInTools`, `CacheRetention`, `ConduitProviderSelection`, `ContextMode`, `EmbeddingError`, `EmbeddingUtils`, `EventKind`, `EventLevel`, `GuardPhase`, `GuardrailError`, `GuardrailType`, `InferenceStreamEvent`, `InferenceStreamUpdate`, `LLM`, `Log`, `MCPServerState`, `MemoryOperation`, `MemoryPriorityHint`, `MergeErrorStrategy`, `MergeStrategies`, `MetricsReporterError`, `ModelSettingsValidationError`, `MultiProviderError`, `OpenRouterProviderError`, `OpenRouterRoutingStrategy`, `OpenRouterToolChoice`, `OrchestrationError`, `OrchestrationValidationError`, `ParallelErrorHandling`, `ParallelExecutionErrorStrategy`, `ParallelMergeStrategy`, `PersistentMemoryError`, `PipelineError`, `ResilienceError`, `RetryPolicyBridge`, `SendableValue`, `SessionError`, `SpanStatus`, `StepStatus`, `StreamHelper`, `SummarizerError`, `Swarm`, `SwarmError`, `SwarmToolRegistryError`, `ToolChainError`, `ToolChoice`, `TruncationStrategy`, `TypedParallel`, `VectorMemoryError`, `Verbosity`, `WorkflowCheckpointPolicy`, `WorkflowExecutionOutcome`, `WorkflowInterruptReason`
 
 ### Protocols (40+)
 

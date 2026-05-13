@@ -130,7 +130,7 @@
 **Quality Assessment:**
 - This is the **canonical V3 API specification**
 - Well-structured with clear sections
-- Uses correct V3 types: `GuardrailSpec`, `MemoryOption`, `RunOptions`
+- Uses correct V3 types: `GuardrailSpec`, `Memory` dot-syntax factories, `RunOptions`
 - Proper Swift syntax highlighting
 
 **Minor Issues:**

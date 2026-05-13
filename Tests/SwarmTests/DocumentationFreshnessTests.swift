@@ -46,6 +46,31 @@ struct DocumentationFreshnessTests {
         #expect(!catalog.contains("| ToolChain |"))
     }
 
+    @Test("public memory docs do not advertise removed builder APIs")
+    func publicMemoryDocsDoNotAdvertiseRemovedBuilderAPIs() throws {
+        let checkedFiles = [
+            "README.md",
+            "docs/reference/front-facing-api.md",
+            "docs/reference/api-catalog.md",
+            "docs/reference/docs-folder-audit-report.md",
+            "docs/reference/documentation-validation-report.md",
+            "docs/swarm-complete-reference.md",
+        ]
+
+        for file in checkedFiles {
+            let text = try readRepoFile(file)
+            #expect(!text.contains("`MemoryOption`"), "\(file) should not mention removed MemoryOption API")
+            #expect(!text.contains("`MemoryBuilder`"), "\(file) should not mention removed MemoryBuilder API")
+            #expect(!text.contains("MemoryBuilder."), "\(file) should not mention removed MemoryBuilder API")
+            #expect(!text.contains("@MemoryBuilder"), "\(file) should not mention removed MemoryBuilder API")
+            #expect(!text.contains("struct MemoryBuilder"), "\(file) should not mention removed MemoryBuilder API")
+            #expect(!text.contains("`VectorMemoryBuilder`"), "\(file) should not mention internal VectorMemoryBuilder API")
+            #expect(!text.contains("`CompositeMemory`"), "\(file) should not mention removed CompositeMemory API")
+            #expect(!text.contains("CompositeMemory."), "\(file) should not mention removed CompositeMemory API")
+            #expect(!text.contains("actor CompositeMemory"), "\(file) should not mention removed CompositeMemory API")
+        }
+    }
+
     @Test("guardrail docs do not advertise a non-existent timeout")
     func guardrailDocsDoNotAdvertiseMissingTimeout() throws {
         let agentSource = try readRepoFile("Sources/Swarm/Agents/Agent.swift")
