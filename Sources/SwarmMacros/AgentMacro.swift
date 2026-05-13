@@ -181,15 +181,9 @@ public struct AgentMacro: MemberMacro, ExtensionMacro {
 
                             // Store in memory (for AI context) if available
                             if let mem = activeMemory {
-                                // Seed session history only once for a fresh memory instance.
-                                if session != nil, await mem.isEmpty, !sessionHistory.isEmpty {
-                                    if let replayAware = mem as? any MemorySessionReplayAware {
-                                        await replayAware.importSessionHistory(sessionHistory)
-                                    } else {
-                                        for msg in sessionHistory {
-                                            await mem.add(msg)
-                                        }
-                                    }
+                                // Seed session history only once when the memory is eligible.
+                                if session != nil {
+                                    await mem.seedSessionHistoryIfNeeded(sessionHistory)
                                 }
                                 await mem.add(userMessage)
                             }

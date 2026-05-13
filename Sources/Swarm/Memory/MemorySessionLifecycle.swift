@@ -18,3 +18,48 @@ public protocol MemorySessionReplayAware: Memory {
     /// Imports a batch of session history messages using memory-specific logic.
     func importSessionHistory(_ messages: [MemoryMessage]) async
 }
+
+public extension Memory {
+    /// Seeds prior session messages into memory when the memory is eligible and still needs replay.
+    func seedSessionHistoryIfNeeded(_ messages: [MemoryMessage]) async {
+        guard !messages.isEmpty else {
+            return
+        }
+
+        let importPolicy = self as? any MemorySessionImportPolicy
+        guard importPolicy?.allowsAutomaticSessionSeeding ?? true else {
+            return
+        }
+
+        let shouldSeed = if let seedController = self as? any MemorySessionSeedControlling {
+            await seedController.shouldImportSessionHistory()
+        } else {
+            await isEmpty
+        }
+        guard shouldSeed else {
+            return
+        }
+
+        if let replayAware = self as? any MemorySessionReplayAware {
+            await replayAware.importSessionHistory(messages)
+        } else {
+            for message in messages {
+                await add(message)
+            }
+        }
+    }
+}
+
+/// Internal hook for composite memories that contain the agent's default memory
+/// as one layer. The agent runtime uses this to preserve the default memory's
+/// per-session clearing and serialization behavior without clearing static
+/// memory layers such as workspace context.
+protocol MemorySessionTrackingProvider: Sendable {
+    var trackedSessionMemory: (any Memory)? { get }
+}
+
+/// Internal hook for memories that need per-layer control over when session
+/// replay should be imported.
+protocol MemorySessionSeedControlling: Memory {
+    func shouldImportSessionHistory() async -> Bool
+}

@@ -15,12 +15,16 @@ public extension Agent {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
-        let workspaceMemory = workspace.map { WorkspaceMemory(workspace: $0, activatedSkills: []) }
+        let memory: (any Memory)? = if let workspace {
+            try Self.workspaceMemory(workspace: workspace, activatedSkills: [])
+        } else {
+            nil
+        }
         return try Agent(
             tools: builtTools,
             instructions: combinedInstructions,
             configuration: configuration,
-            memory: workspaceMemory,
+            memory: memory,
             inferenceProvider: inferenceProvider
         )
     }
@@ -47,13 +51,23 @@ public extension Agent {
             tools: filterTools(builtTools, using: skills),
             instructions: combinedInstructions,
             configuration: configuration.name(spec.title),
-            memory: WorkspaceMemory(workspace: workspace, activatedSkills: skills),
+            memory: try workspaceMemory(workspace: workspace, activatedSkills: skills),
             inferenceProvider: inferenceProvider
         )
     }
 }
 
 private extension Agent {
+    static func workspaceMemory(
+        workspace: AgentWorkspace,
+        activatedSkills: [WorkspaceSkill]
+    ) throws -> any Memory {
+        CompositeMemory([
+            try makeDefaultMemory(),
+            WorkspaceMemory(workspace: workspace, activatedSkills: activatedSkills),
+        ])
+    }
+
     static func filterTools(_ tools: [any AnyJSONTool], using skills: [WorkspaceSkill]) -> [any AnyJSONTool] {
         let constrainedSkillLists = skills
             .map(\.allowedTools)

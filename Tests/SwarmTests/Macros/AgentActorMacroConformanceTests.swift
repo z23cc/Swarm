@@ -73,4 +73,52 @@ struct AgentActorMacroConformanceTests {
 
         #expect(agent.tools.contains { $0.name == "echo" })
     }
+
+    @Test("Generated run seeds replay into eligible composite memory layers")
+    func generatedRunSeedsReplayIntoCompositeMemoryLayer() async throws {
+        let seedable = ConversationMemory(maxMessages: 20)
+        let staticMemory = StaticMacroContextMemory(context: "Static context includes the garnet-anchor marker.")
+        let composite = CompositeMemory([seedable, staticMemory])
+        let session = InMemorySession(sessionId: "macro-composite-memory")
+        try await session.addItems([
+            .user("Replay history includes the prism-session marker.")
+        ])
+
+        let agent = MacroEchoAgent(memory: composite)
+
+        _ = try await agent.run("current turn", session: session)
+
+        let seedableContext = await seedable.context(for: "prism current", tokenLimit: 1_000)
+        #expect(seedableContext.contains("prism-session marker"))
+        #expect(seedableContext.contains("current turn"))
+    }
+}
+
+private actor StaticMacroContextMemory: Memory, MemorySessionImportPolicy {
+    nonisolated let allowsAutomaticSessionSeeding = false
+
+    private let contextText: String
+
+    init(context: String) {
+        self.contextText = context
+    }
+
+    var count: Int { get async { 1 } }
+    var isEmpty: Bool { get async { false } }
+
+    func add(_ message: MemoryMessage) async {
+        _ = message
+    }
+
+    func context(for query: String, tokenLimit: Int) async -> String {
+        _ = query
+        _ = tokenLimit
+        return contextText
+    }
+
+    func allMessages() async -> [MemoryMessage] {
+        []
+    }
+
+    func clear() async {}
 }
