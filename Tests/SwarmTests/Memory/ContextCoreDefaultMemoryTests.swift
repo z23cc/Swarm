@@ -34,6 +34,35 @@ struct ContextCoreDefaultMemoryTests {
         #expect(systemMessage?.content.contains("First reply") == true)
     }
 
+    @Test("No-session agent run persists default memory for subsequent turns")
+    func noSessionAgentRunPersistsDefaultMemoryForSubsequentTurns() async throws {
+        let provider = MockInferenceProvider(responses: [
+            "First no-session reply",
+            "Second no-session reply"
+        ])
+
+        let agent = try Agent(
+            tools: [],
+            instructions: "You are a helpful assistant.",
+            inferenceProvider: provider
+        )
+
+        _ = try await agent.run("Remember this no-session fact")
+        _ = try await agent.run("What did I ask you to remember?")
+
+        let messageCalls = await provider.generateMessageCalls
+        #expect(messageCalls.count == 2)
+
+        let secondMessages = messageCalls[1].messages
+        let systemMessage = secondMessages.first(where: { $0.role == .system })
+
+        #expect(systemMessage != nil)
+        #expect(systemMessage?.content.contains("ContextCore Memory Context (primary)") == true)
+        #expect(systemMessage?.content.contains("Wax Memory Context (secondary)") == true)
+        #expect(systemMessage?.content.contains("Remember this no-session fact") == true)
+        #expect(systemMessage?.content.contains("First no-session reply") == true)
+    }
+
     @Test("DefaultAgentMemory seeds replayed history into both layers")
     func defaultCompositeMemorySeedsReplayIntoBothLayers() async throws {
         let url = try makeTemporaryWaxURL()
