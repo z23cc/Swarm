@@ -63,6 +63,18 @@ struct FrameworkDXRegressionTests {
         #expect(object["1"] == "fast-one")
     }
 
+    @Test("Workflow indexed parallel merge preserves agent input order")
+    func workflowParallelIndexedMergePreservesInputOrder() async throws {
+        let slow = OrderedWorkflowAgent(output: "slow-zero", delay: .milliseconds(120))
+        let fast = OrderedWorkflowAgent(output: "fast-one", delay: .milliseconds(10))
+
+        let result = try await Workflow()
+            .parallel([slow, fast], merge: .indexed)
+            .run("input")
+
+        #expect(result.output == "[0]: slow-zero\n[1]: fast-one")
+    }
+
     @Test("MCP tool cache invalidation wins over in-flight refresh")
     func mcpToolCacheInvalidationWinsOverInflightRefresh() async throws {
         let client = MCPClient()
