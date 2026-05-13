@@ -309,6 +309,12 @@ public extension ModelSettings {
                 throw ModelSettingsValidationError.invalidRepetitionPenalty(repetitionPenalty)
             }
         }
+
+        if let reasoningMaxTokens = reasoning?.maxTokens {
+            guard reasoningMaxTokens > 0 else {
+                throw ModelSettingsValidationError.invalidReasoningMaxTokens(reasoningMaxTokens)
+            }
+        }
     }
 }
 
@@ -401,6 +407,8 @@ public enum ModelSettingsValidationError: Error, Sendable, LocalizedError {
             "Invalid minP \(value): must be a finite number between 0.0 and 1.0"
         case let .invalidRepetitionPenalty(value):
             "Invalid repetitionPenalty \(value): must be a finite number >= 0.0"
+        case let .invalidReasoningMaxTokens(value):
+            "Invalid reasoning maxTokens \(value): must be greater than 0"
         }
     }
 
@@ -427,6 +435,9 @@ public enum ModelSettingsValidationError: Error, Sendable, LocalizedError {
 
     /// Repetition penalty must be a finite number >= 0.0.
     case invalidRepetitionPenalty(Double)
+
+    /// Reasoning max tokens must be greater than 0.
+    case invalidReasoningMaxTokens(Int)
 }
 
 // MARK: - ToolChoice

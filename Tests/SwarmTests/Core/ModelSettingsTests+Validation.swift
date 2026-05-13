@@ -107,6 +107,31 @@ struct ModelSettingsValidationTests {
         }
     }
 
+    @Test("Valid reasoning maxTokens positive value")
+    func validReasoningMaxTokens() throws {
+        let settings = ModelSettings()
+            .reasoning(ReasoningConfig(maxTokens: 1000))
+        try settings.validate()
+    }
+
+    @Test("Invalid reasoning maxTokens zero throws")
+    func invalidReasoningMaxTokensZero() {
+        let settings = ModelSettings()
+            .reasoning(ReasoningConfig(maxTokens: 0))
+        #expect(throws: ModelSettingsValidationError.self) {
+            try settings.validate()
+        }
+    }
+
+    @Test("Invalid reasoning maxTokens negative throws")
+    func invalidReasoningMaxTokensNegative() {
+        let settings = ModelSettings()
+            .reasoning(ReasoningConfig(maxTokens: -100))
+        #expect(throws: ModelSettingsValidationError.self) {
+            try settings.validate()
+        }
+    }
+
     @Test("Valid frequencyPenalty at lower bound")
     func validFrequencyPenaltyLowerBound() throws {
         let settings = ModelSettings().frequencyPenalty(-2.0)
@@ -363,7 +388,8 @@ struct ModelSettingsValidationErrorTests {
             .invalidMaxTokens(-1),
             .invalidFrequencyPenalty(3.0),
             .invalidPresencePenalty(-3.0),
-            .invalidMinP(2.0)
+            .invalidMinP(2.0),
+            .invalidReasoningMaxTokens(0)
         ]
 
         for error in errors {
