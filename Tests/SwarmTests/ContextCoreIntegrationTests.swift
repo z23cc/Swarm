@@ -24,4 +24,35 @@ struct ContextCoreIntegrationTests {
         #expect(context.contains("alpha"))
         #expect(context.contains("beta"))
     }
+
+    @Test("ContextCoreMemory clear ends an active session")
+    func contextCoreMemoryClearEndsActiveSession() async throws {
+        let recorder = EndSessionRecorder()
+        let memory = try ContextCoreMemory(
+            configuration: ContextCoreMemoryConfiguration(
+                promptTitle: "ContextCore Test Memory",
+                promptGuidance: "Test guidance"
+            ),
+            endSession: { _ in
+                await recorder.record()
+            }
+        )
+
+        await memory.beginMemorySession()
+        await memory.clear()
+
+        #expect(await recorder.count == 1)
+    }
+}
+
+private actor EndSessionRecorder {
+    private var recordedCount = 0
+
+    var count: Int {
+        recordedCount
+    }
+
+    func record() {
+        recordedCount += 1
+    }
 }
