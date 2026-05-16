@@ -113,6 +113,7 @@ public actor HTTPMCPServer: MCPServer {
     public func initialize() async throws -> MCPCapabilities {
         let params: [String: SendableValue] = [
             "protocolVersion": .string("2024-11-05"),
+            "capabilities": .dictionary([:]),
             "clientInfo": .dictionary([
                 "name": .string("Swarm"),
                 "version": .string("1.0.0")
@@ -131,6 +132,7 @@ public actor HTTPMCPServer: MCPServer {
         }
 
         let capabilities = try parseCapabilities(from: result)
+        try await sendNotification(try MCPNotification(method: "notifications/initialized"))
         cachedCapabilities = capabilities
         return capabilities
     }
@@ -299,11 +301,30 @@ public actor HTTPMCPServer: MCPServer {
     /// - Returns: The MCP response from the server.
     /// - Throws: `MCPError` if all retry attempts fail.
     private func sendRequest(_ mcpRequest: MCPRequest) async throws -> MCPResponse {
+        try await sendWithRetry {
+            try await self.performRequest(mcpRequest)
+        }
+    }
+
+    /// Sends an MCP notification with retry logic.
+    ///
+    /// Notifications are JSON-RPC messages without an `id`; successful HTTP responses
+    /// do not need to contain a JSON-RPC body.
+    ///
+    /// - Parameter notification: The MCP notification to send.
+    /// - Throws: `MCPError` if all retry attempts fail.
+    private func sendNotification(_ notification: MCPNotification) async throws {
+        try await sendWithRetry {
+            try await self.performNotification(notification)
+        }
+    }
+
+    private func sendWithRetry<T>(_ operation: () async throws -> T) async throws -> T {
         var lastError: Error?
 
         for attempt in 0..<(maxRetries + 1) {
             do {
-                return try await performRequest(mcpRequest)
+                return try await operation()
             } catch let error as MCPError {
                 lastError = error
 
@@ -392,6 +413,40 @@ public actor HTTPMCPServer: MCPServer {
         }
 
         return try decoder.decode(MCPResponse.self, from: data)
+    }
+
+    /// Performs a single HTTP notification request to the MCP server.
+    ///
+    /// - Parameter notification: The JSON-RPC notification to send.
+    /// - Throws: `MCPError` if the request fails.
+    private func performNotification(_ notification: MCPNotification) async throws {
+        var urlRequest = URLRequest(url: baseURL)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.timeoutInterval = timeout
+
+        if let apiKey {
+            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        urlRequest.httpBody = try encoder.encode(notification)
+
+        let (data, response) = try await session.data(for: urlRequest)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw MCPError.internalError("Invalid response type")
+        }
+
+        let statusCode = httpResponse.statusCode
+        guard (200 ... 299).contains(statusCode) else {
+            let errorMessage = if let bodyString = String(data: data, encoding: .utf8), !bodyString.isEmpty {
+                "HTTP \(statusCode): \(bodyString)"
+            } else {
+                "HTTP \(statusCode)"
+            }
+
+            throw MCPError(code: statusCode, message: errorMessage)
+        }
     }
 
     // MARK: - Parsing Helpers
@@ -563,5 +618,27 @@ public actor HTTPMCPServer: MCPServer {
     /// - Returns: The string value, or nil if not a string.
     private func extractString(_ value: SendableValue?) -> String? {
         value?.stringValue
+    }
+}
+
+private struct MCPNotification: Sendable, Encodable, Equatable {
+    let jsonrpc: String
+    let method: String
+    let params: [String: SendableValue]?
+
+    init(method: String, params: [String: SendableValue]? = nil) throws {
+        guard !method.isEmpty else {
+            throw MCPError.invalidRequest("MCPNotification: method must be non-empty per JSON-RPC 2.0")
+        }
+
+        jsonrpc = "2.0"
+        self.method = method
+        self.params = params
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case jsonrpc
+        case method
+        case params
     }
 }
