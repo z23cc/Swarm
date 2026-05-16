@@ -141,4 +141,83 @@ struct StreamingEventTests {
         #expect(streamCount == 0)
         #expect(generateCount == 0)
     }
+
+    @Test("Agent streaming honors providers that opt out of streaming tool calls")
+    func agentStreamingHonorsToolCallStreamingCapabilityOptOut() async throws {
+        let provider = CapabilityOptOutToolStreamingProvider()
+        let tool = MockTool(name: "test_tool", description: "Test tool")
+        let agent = try Agent(
+            tools: [tool],
+            instructions: "You are a test assistant.",
+            inferenceProvider: provider
+        )
+
+        for try await _ in agent.stream("Start") {}
+
+        #expect(provider.generateWithToolCallsCount == 1)
+        #expect(provider.streamWithToolCallsCount == 0)
+    }
+}
+
+private final class CapabilityOptOutToolStreamingProvider:
+    ToolCallStreamingInferenceProvider,
+    CapabilityReportingInferenceProvider,
+    @unchecked Sendable
+{
+    var capabilities: InferenceProviderCapabilities {
+        [.nativeToolCalling]
+    }
+
+    var generateWithToolCallsCount: Int {
+        withLock { generateWithToolCallsCountStorage }
+    }
+
+    var streamWithToolCallsCount: Int {
+        withLock { streamWithToolCallsCountStorage }
+    }
+
+    private let lock = NSLock()
+    private var generateWithToolCallsCountStorage = 0
+    private var streamWithToolCallsCountStorage = 0
+
+    func generate(prompt _: String, options _: InferenceOptions) async throws -> String {
+        "Done"
+    }
+
+    func stream(prompt _: String, options _: InferenceOptions) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield("Done")
+            continuation.finish()
+        }
+    }
+
+    func generateWithToolCalls(
+        prompt _: String,
+        tools _: [ToolSchema],
+        options _: InferenceOptions
+    ) async throws -> InferenceResponse {
+        withLock {
+            generateWithToolCallsCountStorage += 1
+        }
+        return InferenceResponse(content: "Done", toolCalls: [], finishReason: .completed)
+    }
+
+    func streamWithToolCalls(
+        prompt _: String,
+        tools _: [ToolSchema],
+        options _: InferenceOptions
+    ) -> AsyncThrowingStream<InferenceStreamUpdate, Error> {
+        withLock {
+            streamWithToolCallsCountStorage += 1
+        }
+        return AsyncThrowingStream { continuation in
+            continuation.finish(throwing: AgentError.generationFailed(reason: "streaming tool calls were not advertised"))
+        }
+    }
+
+    private func withLock<T>(_ operation: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return operation()
+    }
 }

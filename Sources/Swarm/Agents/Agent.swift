@@ -1332,9 +1332,12 @@ public struct Agent: AgentRuntime, Sendable {
         let systemMessage = buildSystemMessage(memory: activeMemory, memoryContext: memoryContext)
 
         let enableStreaming = configuration.enableStreaming && observer != nil
+        let capabilities = providerCapabilities(for: provider)
         let structuredToolStreamingProvider = provider as? any ToolCallStreamingConversationInferenceProvider
         let promptToolStreamingProvider = provider as? any ToolCallStreamingInferenceProvider
-        let useToolStreaming = enableStreaming && (structuredToolStreamingProvider != nil || promptToolStreamingProvider != nil)
+        let useToolStreaming = enableStreaming
+            && capabilities.contains(.streamingToolCalls)
+            && (structuredToolStreamingProvider != nil || promptToolStreamingProvider != nil)
         let membraneAdapter = resolvedMembraneAdapter()
 
         while iteration < configuration.maxIterations {
