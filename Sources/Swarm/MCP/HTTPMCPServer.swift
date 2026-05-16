@@ -509,8 +509,15 @@ public actor HTTPMCPServer: MCPServer {
     /// - Parameter schema: The inputSchema value.
     /// - Returns: An array of ToolParameter objects.
     private func parseParameters(from schema: SendableValue?) -> [ToolParameter] {
-        guard let schemaDict = schema?.dictionaryValue,
-              let properties = schemaDict["properties"]?.dictionaryValue else {
+        guard let schemaDict = schema?.dictionaryValue else {
+            return []
+        }
+
+        return parseObjectProperties(from: schemaDict)
+    }
+
+    private func parseObjectProperties(from schemaDict: [String: SendableValue]) -> [ToolParameter] {
+        guard let properties = schemaDict["properties"]?.dictionaryValue else {
             return []
         }
 
@@ -521,35 +528,83 @@ public actor HTTPMCPServer: MCPServer {
             guard let propDict = propValue.dictionaryValue else { continue }
 
             let description = extractString(propDict["description"]) ?? ""
-            let typeString = extractString(propDict["type"]) ?? "any"
-            let paramType = mapParameterType(typeString)
+            let paramType = parseParameterType(from: propDict)
             let isRequired = requiredSet.contains(name)
 
             parameters.append(ToolParameter(
                 name: name,
                 description: description,
                 type: paramType,
-                isRequired: isRequired
+                isRequired: isRequired,
+                defaultValue: propDict["default"]
             ))
         }
 
         return parameters
     }
 
-    /// Maps a JSON Schema type string to a ToolParameter.ParameterType.
+    /// Maps a JSON Schema node to a ToolParameter.ParameterType.
     ///
-    /// - Parameter typeString: The JSON Schema type string.
+    /// - Parameter schemaDict: The JSON Schema node dictionary.
     /// - Returns: The corresponding ParameterType.
-    private func mapParameterType(_ typeString: String) -> ToolParameter.ParameterType {
-        switch typeString.lowercased() {
-        case "string": .string
-        case "integer": .int
-        case "number": .double
-        case "boolean": .bool
-        case "array": .array(elementType: .any)
-        case "object": .object(properties: [])
-        default: .any
+    private func parseParameterType(from schemaDict: [String: SendableValue]) -> ToolParameter.ParameterType {
+        if let options = parseStringOptions(from: schemaDict), !options.isEmpty {
+            return .oneOf(options)
         }
+
+        let typeString = extractString(schemaDict["type"]) ?? inferredTypeString(from: schemaDict)
+
+        switch typeString.lowercased() {
+        case "string":
+            return .string
+        case "integer":
+            return .int
+        case "number":
+            return .double
+        case "boolean":
+            return .bool
+        case "array":
+            if let itemsDict = schemaDict["items"]?.dictionaryValue {
+                return .array(elementType: parseParameterType(from: itemsDict))
+            } else {
+                return .array(elementType: .any)
+            }
+        case "object":
+            return .object(properties: parseObjectProperties(from: schemaDict))
+        default:
+            return .any
+        }
+    }
+
+    private func inferredTypeString(from schemaDict: [String: SendableValue]) -> String {
+        if schemaDict["properties"]?.dictionaryValue != nil {
+            return "object"
+        }
+        if schemaDict["items"]?.dictionaryValue != nil {
+            return "array"
+        }
+        return "any"
+    }
+
+    private func parseStringOptions(from schemaDict: [String: SendableValue]) -> [String]? {
+        if let values = schemaDict["enum"]?.arrayValue?.compactMap(\.stringValue), !values.isEmpty {
+            return values
+        }
+
+        guard let oneOf = schemaDict["oneOf"]?.arrayValue else {
+            return nil
+        }
+
+        let values = oneOf.compactMap { option -> String? in
+            guard let optionDict = option.dictionaryValue else {
+                return nil
+            }
+            if let constValue = optionDict["const"]?.stringValue {
+                return constValue
+            }
+            return optionDict["enum"]?.arrayValue?.compactMap(\.stringValue).first
+        }
+        return values.isEmpty ? nil : values
     }
 
     /// Parses resources from a resources/list response.

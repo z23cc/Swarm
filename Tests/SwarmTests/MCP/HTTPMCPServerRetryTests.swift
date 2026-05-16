@@ -2,7 +2,7 @@ import Foundation
 @testable import Swarm
 import Testing
 
-@Suite("HTTPMCPServer Retry Tests")
+@Suite("HTTPMCPServer Retry Tests", .serialized)
 struct HTTPMCPServerRetryTests {
     @Test("Does not retry on HTTP 4xx responses")
     func doesNotRetryOnClientErrors() async throws {
@@ -35,6 +35,121 @@ struct HTTPMCPServerRetryTests {
         }
 
         #expect(MockURLProtocol.requestCount == 1)
+    }
+
+    @Test("List tools preserves nested input schema fidelity")
+    func listToolsPreservesNestedInputSchemaFidelity() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: config)
+
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+
+        MockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "https://mcp.example.com/api")!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            let body: [String: Any] = [
+                "jsonrpc": "2.0",
+                "id": "tools-list",
+                "result": [
+                    "tools": [
+                        [
+                            "name": "search",
+                            "description": "Search documents",
+                            "inputSchema": [
+                                "type": "object",
+                                "required": ["payload"],
+                                "properties": [
+                                    "payload": [
+                                        "type": "object",
+                                        "description": "Search payload",
+                                        "required": ["query", "filters"],
+                                        "properties": [
+                                            "query": [
+                                                "type": "string",
+                                                "description": "Query source",
+                                                "enum": ["docs", "news"]
+                                            ],
+                                            "limit": [
+                                                "type": "integer",
+                                                "description": "Maximum results",
+                                                "default": 10
+                                            ],
+                                            "filters": [
+                                                "type": "array",
+                                                "description": "Structured filters",
+                                                "items": [
+                                                    "type": "object",
+                                                    "required": ["field"],
+                                                    "properties": [
+                                                        "field": [
+                                                            "type": "string",
+                                                            "description": "Field name"
+                                                        ],
+                                                        "values": [
+                                                            "type": "array",
+                                                            "description": "Allowed values",
+                                                            "items": ["type": "string"]
+                                                        ]
+                                                    ]
+                                                ]
+                                            ]
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+            return (response, try JSONSerialization.data(withJSONObject: body))
+        }
+
+        let server = try HTTPMCPServer(
+            url: URL(string: "https://mcp.example.com/api")!,
+            name: "schema-test",
+            maxRetries: 0,
+            session: session
+        )
+
+        let tools = try await server.listTools()
+        let tool = try #require(tools.first)
+        let payload = try #require(tool.parameters.first { $0.name == "payload" })
+        #expect(payload.isRequired)
+
+        guard case let .object(payloadProperties) = payload.type else {
+            Issue.record("Expected payload to remain an object schema")
+            return
+        }
+
+        let query = try #require(payloadProperties.first { $0.name == "query" })
+        #expect(query.isRequired)
+        #expect(query.type == .oneOf(["docs", "news"]))
+
+        let limit = try #require(payloadProperties.first { $0.name == "limit" })
+        #expect(!limit.isRequired)
+        #expect(limit.defaultValue == .int(10))
+
+        let filters = try #require(payloadProperties.first { $0.name == "filters" })
+        #expect(filters.isRequired)
+        guard case let .array(elementType) = filters.type,
+              case let .object(filterProperties) = elementType else {
+            Issue.record("Expected filters to preserve array object item schema")
+            return
+        }
+
+        let field = try #require(filterProperties.first { $0.name == "field" })
+        #expect(field.isRequired)
+        #expect(field.type == .string)
+
+        let values = try #require(filterProperties.first { $0.name == "values" })
+        #expect(!values.isRequired)
+        #expect(values.type == .array(elementType: .string))
     }
 }
 
