@@ -46,7 +46,7 @@ struct SwarmMCPServerServiceTests {
         )
 
         #expect(result.isError != true)
-        #expect(result.content == [.text("HELLO")])
+        #expect(textContent(from: result.content) == "HELLO")
     }
 
     @Test("ListTools returns deterministic stable ordering and schemas")
@@ -109,7 +109,7 @@ struct SwarmMCPServerServiceTests {
         )
 
         #expect(result.isError != true)
-        #expect(result.content == [.text("hello")])
+        #expect(textContent(from: result.content) == "hello")
 
         let invocations = await executor.invocationsSnapshot()
         #expect(invocations.count == 1)
@@ -276,7 +276,7 @@ struct SwarmMCPServerServiceTests {
                         arguments: ["value": .int(i)]
                     )
                     guard
-                        case let .text(text)? = result.content.first,
+                        let text = textContent(from: result.content),
                         let parsed = Int(text)
                     else {
                         throw SwarmMCPServerServiceTestError.unreachable("unexpected content")
@@ -410,6 +410,13 @@ struct SwarmMCPServerServiceTests {
         try await firstStart
         await service.stop()
     }
+}
+
+private func textContent(from content: [MCP.Tool.Content]) -> String? {
+    guard case let .text(text: text, annotations: _, _meta: _)? = content.first else {
+        return nil
+    }
+    return text
 }
 
 private func metadataObject(from content: [MCP.Tool.Content]) throws -> [String: Value] {
