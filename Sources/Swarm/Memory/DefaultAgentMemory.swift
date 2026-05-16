@@ -82,7 +82,48 @@ public actor DefaultAgentMemory: Memory, MemoryPromptDescriptor, MemorySessionLi
     }
 
     public func context(for query: MemoryQuery) async -> String {
-        await context(for: query.text, tokenLimit: query.tokenLimit)
+        guard query.tokenLimit > 0 else {
+            return ""
+        }
+
+        let primaryBudget = max(1, Int(Double(query.tokenLimit) * 0.7))
+        let secondaryBudget = query.tokenLimit
+
+        async let primaryContextTask = contextMemory.context(
+            for: query.text,
+            tokenLimit: primaryBudget
+        )
+        let secondaryContextStr = await waxContext(
+            for: MemoryQuery(
+                text: query.text,
+                tokenLimit: secondaryBudget,
+                maxItems: query.maxItems,
+                maxItemTokens: query.maxItemTokens
+            )
+        )
+        let primaryContextStr = await primaryContextTask
+
+        let primaryAllowance = query.maxItems == 1 ? 1 : max(1, query.maxItems - 1)
+        let primary = await limitContextItems(
+            primaryContextStr,
+            maxItems: primaryAllowance,
+            maxItemTokens: query.maxItemTokens,
+            tokenLimit: primaryBudget
+        )
+
+        let secondaryAllowance = max(0, query.maxItems - primary.count)
+        let secondary = await limitContextItems(
+            secondaryContextStr,
+            maxItems: secondaryAllowance,
+            maxItemTokens: query.maxItemTokens,
+            tokenLimit: secondaryBudget
+        )
+
+        return await formatContext(
+            primary: primary.text.trimmingCharacters(in: .whitespacesAndNewlines),
+            secondary: secondary.text.trimmingCharacters(in: .whitespacesAndNewlines),
+            tokenLimit: query.tokenLimit
+        )
     }
 
     public func allMessages() async -> [MemoryMessage] {
@@ -176,6 +217,20 @@ public actor DefaultAgentMemory: Memory, MemoryPromptDescriptor, MemorySessionLi
         }
     }
 
+    private func waxContext(for query: MemoryQuery) async -> String {
+        guard query.tokenLimit > 0 else {
+            return ""
+        }
+
+        do {
+            let wax = try await ensureWaxMemory()
+            return await wax.context(for: query)
+        } catch {
+            Log.memory.warning("DefaultAgentMemory: Failed to retrieve Wax context: \(error.localizedDescription)")
+            return ""
+        }
+    }
+
     private func formatContext(primary: String, secondary: String, tokenLimit: Int) async -> String {
         let primarySection = makeSection(
             title: contextMemory.memoryPromptTitle,
@@ -251,6 +306,90 @@ public actor DefaultAgentMemory: Memory, MemoryPromptDescriptor, MemorySessionLi
         }
 
         return rendered.joined(separator: "\n")
+    }
+
+    private func limitContextItems(
+        _ context: String,
+        maxItems: Int,
+        maxItemTokens: Int,
+        tokenLimit: Int
+    ) async -> (text: String, count: Int) {
+        guard maxItems > 0, tokenLimit > 0 else {
+            return ("", 0)
+        }
+
+        var rendered: [String] = []
+        rendered.reserveCapacity(maxItems)
+
+        for item in contextItems(from: context) {
+            guard rendered.count < maxItems else {
+                break
+            }
+
+            let itemLimit = min(maxItemTokens, tokenLimit)
+            let trimmedItem = await trimToTokenLimit(item, tokenLimit: itemLimit)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedItem.isEmpty else {
+                continue
+            }
+
+            let candidate = (rendered + [trimmedItem]).joined(separator: "\n\n")
+            if await tokenCount(for: candidate) <= tokenLimit {
+                rendered.append(trimmedItem)
+            } else {
+                if rendered.isEmpty {
+                    let fallback = await trimToTokenLimit(trimmedItem, tokenLimit: tokenLimit)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !fallback.isEmpty {
+                        rendered.append(fallback)
+                    }
+                }
+                break
+            }
+        }
+
+        return (rendered.joined(separator: "\n\n"), rendered.count)
+    }
+
+    private func contextItems(from context: String) -> [String] {
+        var items: [String] = []
+        var current: [String] = []
+
+        for line in context.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                if !current.isEmpty {
+                    current.append(line)
+                }
+                continue
+            }
+
+            if isContextItemHeader(trimmed), !current.isEmpty {
+                items.append(current.joined(separator: "\n"))
+                current = [line]
+            } else {
+                current.append(line)
+            }
+        }
+
+        if !current.isEmpty {
+            items.append(current.joined(separator: "\n"))
+        }
+
+        return items
+    }
+
+    private func isContextItemHeader(_ line: String) -> Bool {
+        if line.hasPrefix("[user]:")
+            || line.hasPrefix("[assistant]:")
+            || line.hasPrefix("[system]:")
+            || line.hasPrefix("[tool]:") {
+            return true
+        }
+
+        return line.hasPrefix("[expanded frame:")
+            || line.hasPrefix("[surrogate frame:")
+            || line.hasPrefix("[snippet frame:")
     }
 
     private func trimToTokenLimit(_ text: String, tokenLimit: Int) async -> String {

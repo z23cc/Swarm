@@ -160,6 +160,150 @@ struct ContextCoreDefaultMemoryTests {
         #expect(context.isEmpty == false)
     }
 
+    @Test("DefaultAgentMemory policy query limits retrieved items")
+    func defaultCompositeMemoryPolicyQueryLimitsRetrievedItems() async throws {
+        let url = try makeTemporaryWaxURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let counter = CountingPromptTokenCounter()
+        let memory = try DefaultAgentMemory(
+            configuration: .init(
+                waxStoreURL: url
+            )
+        )
+
+        await memory.add(.user("policytopic policytopic policytopic keep-most-relevant"))
+        await memory.add(.assistant("policytopic drop-secondary"))
+        await memory.add(.user("policytopic drop-tertiary"))
+
+        let context = await AgentEnvironmentValues.$current.withValue(
+            AgentEnvironment(promptTokenCounter: counter)
+        ) {
+            await memory.context(
+                for: MemoryQuery(
+                    text: "policytopic",
+                    tokenLimit: 1_000,
+                    maxItems: 1,
+                    maxItemTokens: 300
+                )
+            )
+        }
+
+        #expect(context.contains("keep-most-relevant"))
+        #expect(!context.contains("drop-secondary"))
+        #expect(!context.contains("drop-tertiary"))
+    }
+
+    @Test("DefaultAgentMemory policy query limits tokens per retrieved item")
+    func defaultCompositeMemoryPolicyQueryLimitsItemTokens() async throws {
+        let url = try makeTemporaryWaxURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let counter = CountingPromptTokenCounter()
+        let memory = try DefaultAgentMemory(
+            configuration: .init(
+                waxStoreURL: url
+            )
+        )
+
+        await memory.add(.user("policytopic \(String(repeating: "x", count: 180)) tail-not-allowed"))
+
+        let context = await AgentEnvironmentValues.$current.withValue(
+            AgentEnvironment(promptTokenCounter: counter)
+        ) {
+            await memory.context(
+                for: MemoryQuery(
+                    text: "policytopic",
+                    tokenLimit: 800,
+                    maxItems: 1,
+                    maxItemTokens: 80
+                )
+            )
+        }
+
+        #expect(context.contains("policytopic"))
+        #expect(!context.contains("tail-not-allowed"))
+    }
+
+    @Test("DefaultAgentMemory policy query preserves bracket-prefixed body lines")
+    func defaultCompositeMemoryPolicyQueryPreservesBracketPrefixedBodyLines() async throws {
+        let url = try makeTemporaryWaxURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let counter = CountingPromptTokenCounter()
+        let memory = try DefaultAgentMemory(
+            configuration: .init(
+                waxStoreURL: url
+            )
+        )
+
+        await memory.add(.user("""
+        brackettopic
+        [dependencies]
+        body-kept
+        """))
+        await memory.add(.assistant("brackettopic drop-secondary"))
+
+        let context = await AgentEnvironmentValues.$current.withValue(
+            AgentEnvironment(promptTokenCounter: counter)
+        ) {
+            await memory.context(
+                for: MemoryQuery(
+                    text: "brackettopic",
+                    tokenLimit: 1_000,
+                    maxItems: 1,
+                    maxItemTokens: 600
+                )
+            )
+        }
+
+        #expect(context.contains("brackettopic"))
+        #expect(context.contains("[dependencies]"))
+        #expect(context.contains("body-kept"))
+        #expect(!context.contains("drop-secondary"))
+    }
+
+    @Test("DefaultAgentMemory policy query trims durable-only oversized items after reopen")
+    func defaultCompositeMemoryPolicyQueryTrimsDurableOnlyOversizedItemsAfterReopen() async throws {
+        let url = try makeTemporaryWaxURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let counter = CountingPromptTokenCounter()
+        let longPayload = String(repeating: "durable body ", count: 120)
+
+        do {
+            let seed = try DefaultAgentMemory(
+                configuration: .init(
+                    waxStoreURL: url
+                )
+            )
+            await seed.add(.user("durable-policytopic \(longPayload) tail-not-allowed"))
+        }
+
+        let reopened = try DefaultAgentMemory(
+            configuration: .init(
+                waxStoreURL: url
+            )
+        )
+
+        let context = await AgentEnvironmentValues.$current.withValue(
+            AgentEnvironment(promptTokenCounter: counter)
+        ) {
+            await reopened.context(
+                for: MemoryQuery(
+                    text: "durable-policytopic",
+                    tokenLimit: 180,
+                    maxItems: 1,
+                    maxItemTokens: 80
+                )
+            )
+        }
+
+        #expect((await reopened.workingMessages()).isEmpty)
+        #expect(context.contains("durable-policytopic"))
+        #expect(!context.contains("tail-not-allowed"))
+    }
+
     @Test("DefaultAgentMemory skips duplicate replay entries against an existing Wax store")
     func defaultCompositeMemorySkipsDuplicateReplayEntries() async throws {
         let url = try makeTemporaryWaxURL()
