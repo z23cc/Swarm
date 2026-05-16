@@ -480,7 +480,7 @@ final class ToolMacroTests: XCTestCase {
                         return ""
                     }
 
-                    public let name: String = "myawesome"
+                    public let name: String = "my_awesome"
 
                     public let description: String = "Simple tool"
 

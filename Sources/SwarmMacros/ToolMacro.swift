@@ -84,7 +84,7 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
         }
         let typeName = structDecl.name.text
 
-        // Derive tool name from type name (lowercase, remove "Tool" suffix)
+        // Derive tool name from type name (snake_case, remove "Tool" suffix)
         let toolName = deriveToolName(from: typeName)
 
         // Find all @Parameter annotated properties
@@ -168,8 +168,18 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
         if name.hasSuffix("Tool") {
             name = String(name.dropLast(4))
         }
-        // Convert to lowercase
-        return name.lowercased()
+        var output = ""
+        for character in name {
+            if character.isUppercase {
+                if !output.isEmpty {
+                    output.append("_")
+                }
+                output.append(character.lowercased())
+            } else {
+                output.append(character)
+            }
+        }
+        return output
     }
 
     /// Extracts @Parameter annotated properties from the declaration.
