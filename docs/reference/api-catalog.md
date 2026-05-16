@@ -1561,70 +1561,6 @@ Generated from `Sources/Swarm/` on 2026-04-30.
 | 115 | func | public | InferenceProviderSummarizer.conversationSummarizer(provider:) | `public static func conversationSummarizer(provider: any InferenceProvider) -> InferenceProviderSummarizer` |
 | 137 | func | public | InferenceProviderSummarizer.reasoningSummarizer(provider:) | `public static func reasoningSummarizer(provider: any InferenceProvider) -> InferenceProviderSummarizer` |
 
-### Memory/MemoryBuilder.swift
-
-| Line | Kind | Access | Name | Signature |
-|------|------|--------|------|-----------|
-| 26 | @resultBuilder | public | MemoryBuilder | `public @resultBuilder struct MemoryBuilder` |
-| 28 | func | public | MemoryBuilder.buildBlock(_:) | `public static func buildBlock(_ components: MemoryComponent...) -> [MemoryComponent]` |
-| 33 | func | public | MemoryBuilder.buildBlock(_:) | `public static func buildBlock(_ components: [MemoryComponent]...) -> [MemoryComponent]` |
-| 38 | func | public | MemoryBuilder.buildBlock() | `public static func buildBlock() -> [MemoryComponent]` |
-| 43 | func | public | MemoryBuilder.buildOptional(_:) | `public static func buildOptional(_ component: [MemoryComponent]?) -> [MemoryComponent]` |
-| 48 | func | public | MemoryBuilder.buildEither(first:) | `public static func buildEither(first component: [MemoryComponent]) -> [MemoryComponent]` |
-| 53 | func | public | MemoryBuilder.buildEither(second:) | `public static func buildEither(second component: [MemoryComponent]) -> [MemoryComponent]` |
-| 58 | func | public | MemoryBuilder.buildArray(_:) | `public static func buildArray(_ components: [[MemoryComponent]]) -> [MemoryComponent]` |
-| 63 | func | public | MemoryBuilder.buildExpression(_:) | `public static func buildExpression(_ expression: any Memory) -> [MemoryComponent]` |
-| 68 | func | public | MemoryBuilder.buildExpression(_:) | `public static func buildExpression(_ expression: MemoryComponent) -> [MemoryComponent]` |
-| 73 | func | public | MemoryBuilder.buildFinalResult(_:) | `public static func buildFinalResult(_ component: [MemoryComponent]) -> [MemoryComponent]` |
-| 81 | struct | public | MemoryComponent | `public struct MemoryComponent` |
-| 83 | var | public | MemoryComponent.memory | `public let memory: any Memory` |
-| 86 | var | public | MemoryComponent.priority | `public let priority: MemoryPriority` |
-| 89 | var | public | MemoryComponent.identifier | `public let identifier: String?` |
-| 97 | func | public | MemoryComponent.init(memory:priority:identifier:) | `public init(memory: any Memory, priority: MemoryPriority = .normal, identifier: String? = nil)` |
-| 108 | func | public | MemoryComponent.priority(_:) | `public func priority(_ priority: MemoryPriority) -> MemoryComponent` |
-| 113 | func | public | MemoryComponent.identified(by:) | `public func identified(by identifier: String) -> MemoryComponent` |
-| 121 | enum | public | MemoryPriority | `public enum MemoryPriority` |
-| 124 | func | public | MemoryPriority.<(_:_:) | `public static func < (lhs: MemoryPriority, rhs: MemoryPriority) -> Bool` |
-| 128 | case | public | MemoryPriority.low | `public case low` |
-| 129 | case | public | MemoryPriority.normal | `public case normal` |
-| 130 | case | public | MemoryPriority.high | `public case high` |
-| 136 | enum | public | RetrievalStrategy | `public enum RetrievalStrategy` |
-| 138 | case | public | RetrievalStrategy.recency | `public case recency` |
-| 141 | case | public | RetrievalStrategy.relevance | `public case relevance` |
-| 144 | case | public | RetrievalStrategy.hybrid(recencyWeight:relevanceWeight:) | `public case hybrid(recencyWeight: Double, relevanceWeight: Double)` |
-| 147 | case | public | RetrievalStrategy.custom(_:) | `public case custom(([MemoryMessage], String) async -> [MemoryMessage])` |
-| 153 | enum | public | MemoryMergeStrategy | `public enum MemoryMergeStrategy` |
-| 155 | case | public | MemoryMergeStrategy.concatenate | `public case concatenate` |
-| 158 | case | public | MemoryMergeStrategy.interleave | `public case interleave` |
-| 161 | case | public | MemoryMergeStrategy.deduplicate | `public case deduplicate` |
-| 164 | case | public | MemoryMergeStrategy.primaryOnly | `public case primaryOnly` |
-| 167 | case | public | MemoryMergeStrategy.custom(_:) | `public case custom(([[MemoryMessage]]) -> [MemoryMessage])` |
-| 193 | class | public | CompositeMemory | `public actor CompositeMemory` |
-| 197 | var | public | CompositeMemory.componentCount | `public nonisolated var componentCount: Int { get }` |
-| 201 | var | public | CompositeMemory.count | `public var count: Int { get async }` |
-| 211 | var | public | CompositeMemory.isEmpty | `public var isEmpty: Bool { get async }` |
-| 225 | func | public | CompositeMemory.init(tokenEstimator:_:) | `public init(tokenEstimator: any TokenEstimator = CharacterBasedTokenEstimator.shared, @MemoryBuilder _ content: () -> [MemoryComponent])` |
-| 242 | func | public | CompositeMemory.withRetrievalStrategy(_:) | `public nonisolated func withRetrievalStrategy(_ strategy: RetrievalStrategy) -> CompositeMemory` |
-| 255 | func | public | CompositeMemory.withMergeStrategy(_:) | `public nonisolated func withMergeStrategy(_ strategy: MemoryMergeStrategy) -> CompositeMemory` |
-| 268 | func | public | CompositeMemory.withTokenEstimator(_:) | `public nonisolated func withTokenEstimator(_ estimator: any TokenEstimator) -> CompositeMemory` |
-| 279 | func | public | CompositeMemory.add(_:) | `public func add(_ message: MemoryMessage) async` |
-| 285 | func | public | CompositeMemory.context(for:tokenLimit:) | `public func context(for query: String, tokenLimit: Int) async -> String` |
-| 290 | func | public | CompositeMemory.allMessages() | `public func allMessages() async -> [MemoryMessage]` |
-| 301 | func | public | CompositeMemory.clear() | `public func clear() async` |
-| 314 | func | public | CompositeMemory.store(_:) | `public func store(_ message: MemoryMessage) async` |
-| 322 | func | public | CompositeMemory.retrieve(limit:) | `public func retrieve(limit: Int) async -> [MemoryMessage]` |
-| 331 | func | public | CompositeMemory.buildContext(maxTokens:) | `public func buildContext(maxTokens: Int) async -> String` |
-| 466 | func | public | ConversationMemory.withSummarization(after:) | `public nonisolated func withSummarization(after _: Int) -> MemoryComponent` |
-| 476 | func | public | ConversationMemory.withTokenLimit(_:) | `public nonisolated func withTokenLimit(_: Int) -> MemoryComponent` |
-| 484 | func | public | ConversationMemory.priority(_:) | `public nonisolated func priority(_ priority: MemoryPriority) -> MemoryComponent` |
-| 496 | func | public | SlidingWindowMemory.withOverlapSize(_:) | `public nonisolated func withOverlapSize(_: Int) -> MemoryComponent` |
-| 504 | func | public | SlidingWindowMemory.priority(_:) | `public nonisolated func priority(_ priority: MemoryPriority) -> MemoryComponent` |
-| 512 | protocol | public | VectorMemoryConfigurable | `public protocol VectorMemoryConfigurable : Memory` |
-| 514 | func | public | VectorMemoryConfigurable.withSimilarityThreshold(_:) | `public func withSimilarityThreshold(_ threshold: Double) -> MemoryComponent` |
-| 517 | func | public | VectorMemoryConfigurable.withMaxResults(_:) | `public func withMaxResults(_ max: Int) -> MemoryComponent` |
-| 524 | func | public | VectorMemoryConfigurable.withSimilarityThreshold(_:) | `public nonisolated func withSimilarityThreshold(_: Double) -> MemoryComponent` |
-| 529 | func | public | VectorMemoryConfigurable.withMaxResults(_:) | `public nonisolated func withMaxResults(_: Int) -> MemoryComponent` |
-
 ### Memory/MemoryMessage.swift
 
 | Line | Kind | Access | Name | Signature |
@@ -2494,21 +2430,23 @@ Generated from `Sources/Swarm/` on 2026-04-30.
 
 | Line | Kind | Access | Name | Signature |
 |------|------|--------|------|-----------|
-| 4 | struct | public | Workflow | `public struct Workflow` |
-| 12 | enum | public | Workflow.MergeStrategy | `public enum MergeStrategy` |
-| 15 | case | public | Workflow.MergeStrategy.structured | `public case structured` |
-| 18 | case | public | Workflow.MergeStrategy.indexed | `public case indexed` |
-| 20 | case | public | Workflow.MergeStrategy.first | `public case first` |
-| 22 | case | public | Workflow.MergeStrategy.custom(_:) | `public case custom(([AgentResult]) -> String)` |
-| 25 | func | public | Workflow.init() | `public init()` |
-| 27 | func | public | Workflow.step(_:) | `public func step(_ agent: some AgentRuntime) -> Workflow` |
-| 33 | func | public | Workflow.parallel(_:merge:) | `public func parallel(_ agents: [any AgentRuntime], merge: Workflow.MergeStrategy = .structured) -> Workflow` |
-| 39 | func | public | Workflow.route(_:) | `public func route(_ condition: @escaping (String) -> (any AgentRuntime)?) -> Workflow` |
-| 45 | func | public | Workflow.repeatUntil(maxIterations:_:) | `public func repeatUntil(maxIterations: Int = 100, _ condition: @escaping (AgentResult) -> Bool) -> Workflow` |
-| 55 | func | public | Workflow.timeout(_:) | `public func timeout(_ duration: Duration) -> Workflow` |
-| 61 | func | public | Workflow.observed(by:) | `public func observed(by observer: some AgentObserver) -> Workflow` |
-| 67 | func | public | Workflow.run(_:) | `public func run(_ input: String) async throws -> AgentResult` |
-| 418 | func | public | Workflow.stream(_:) | `public func stream(_ input: String) -> AsyncThrowingStream<AgentEvent, any Error>` |
+| 89 | struct | public | Workflow | `public struct Workflow` |
+| 125 | enum | public | Workflow.MergeStrategy | `public enum MergeStrategy` |
+| 140 | case | public | Workflow.MergeStrategy.structured | `public case structured` |
+| 157 | case | public | Workflow.MergeStrategy.indexed | `public case indexed` |
+| 173 | case | public | Workflow.MergeStrategy.first | `public case first` |
+| 193 | case | public | Workflow.MergeStrategy.custom(_:) | `public case custom(@Sendable ([AgentResult]) -> String)` |
+| 209 | func | public | Workflow.init() | `public init()` |
+| 229 | func | public | Workflow.step(_:) | `public func step(_ agent: some AgentRuntime) -> Workflow` |
+| 259 | func | public | Workflow.parallel(_:merge:customMergeSignature:fileID:line:) | `public func parallel(_ agents: [any AgentRuntime], merge: Workflow.MergeStrategy = .structured, customMergeSignature: String? = nil, fileID: StaticString = #fileID, line: UInt = #line) -> Workflow` |
+| 311 | func | public | Workflow.route(_:signature:fileID:line:) | `public func route(_ condition: @escaping @Sendable (String) -> (any AgentRuntime)?, signature: String? = nil, fileID: StaticString = #fileID, line: UInt = #line) -> Workflow` |
+| 326 | func | public | Workflow.route(signature:fileID:line:_:) | `public func route(signature: String, fileID: StaticString = #fileID, line: UInt = #line, _ condition: @escaping @Sendable (String) -> (any AgentRuntime)?) -> Workflow` |
+| 361 | func | public | Workflow.repeatUntil(maxIterations:_:signature:fileID:line:) | `public func repeatUntil(maxIterations: Int = 100, _ condition: @escaping @Sendable (AgentResult) -> Bool, signature: String? = nil, fileID: StaticString = #fileID, line: UInt = #line) -> Workflow` |
+| 381 | func | public | Workflow.repeatUntil(maxIterations:signature:fileID:line:_:) | `public func repeatUntil(maxIterations: Int = 100, signature: String, fileID: StaticString = #fileID, line: UInt = #line, _ condition: @escaping @Sendable (AgentResult) -> Bool) -> Workflow` |
+| 407 | func | public | Workflow.timeout(_:) | `public func timeout(_ duration: Duration) -> Workflow` |
+| 433 | func | public | Workflow.observed(by:) | `public func observed(by observer: some AgentObserver) -> Workflow` |
+| 459 | func | public | Workflow.run(_:) | `public func run(_ input: String) async throws -> AgentResult` |
+| 494 | func | public | Workflow.stream(_:) | `public func stream(_ input: String) -> AsyncThrowingStream<AgentEvent, Error>` |
 
 ### Workflow/WorkflowCheckpointing.swift
 

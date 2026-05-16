@@ -35,6 +35,22 @@ struct MemoryIngestionPolicyTests {
         }))
     }
 
+    @Test("No-session runs do not store transcript turns in explicit memory")
+    func noSessionRunDoesNotStoreTranscriptTurnsInExplicitMemory() async throws {
+        let provider = MockInferenceProvider(responses: ["Final Answer: ok"])
+        let memory = MockAgentMemory()
+
+        let agent = try Agent(
+            memory: memory,
+            inferenceProvider: provider
+        )
+
+        _ = try await agent.run("hi")
+
+        let added = await memory.addCalls
+        #expect(!added.contains(where: { $0.role == .user || $0.role == .assistant }))
+    }
+
     @Test("Session history is seeded only when memory is empty")
     func sessionHistorySeedsOnce() async throws {
         let session = InMemorySession(sessionId: "test")

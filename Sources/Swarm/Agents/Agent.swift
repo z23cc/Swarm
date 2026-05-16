@@ -931,11 +931,16 @@ public struct Agent: AgentRuntime, Sendable {
                 if let transcriptHash = try? persistedTranscript.transcriptHash() {
                     _ = resultBuilder.setMetadata(Self.transcriptHashMetadataKey, .string(transcriptHash))
                 }
+            } else if let activeMemory, shouldPersistNoSessionTurn(to: activeMemory) {
+                await persistNoSessionTurn(
+                    userMessage: userMessage,
+                    transcriptMessages: toolLoopOutcome.transcriptMessages,
+                    to: activeMemory
+                )
             }
 
-            // Memory provides additional context (RAG, summaries) - NOT for conversation storage
-            // This avoids duplication: session stores conversation, memory provides context
-            // Note: If using memory for conversation context, populate it from session on demand
+            // Session remains the transcript source of truth. When no session is supplied,
+            // the default memory keeps user/assistant turns available for subsequent runs.
 
             _ = resultBuilder.setMetadata(RuntimeMetadata.runtimeEngineKey, .string(RuntimeMetadata.graphRuntimeEngineName))
             let result = resultBuilder.build()
@@ -1111,6 +1116,28 @@ public struct Agent: AgentRuntime, Sendable {
         }
 
         return nil
+    }
+
+    private func shouldPersistNoSessionTurn(to activeMemory: any Memory) -> Bool {
+        guard let defaultMemory else {
+            return false
+        }
+
+        return activeMemory as AnyObject === defaultMemory as AnyObject
+    }
+
+    private func persistNoSessionTurn(
+        userMessage: MemoryMessage,
+        transcriptMessages: [MemoryMessage],
+        to memory: any Memory
+    ) async {
+        let messages = ([userMessage] + transcriptMessages).filter { message in
+            message.role == .user || message.role == .assistant
+        }
+
+        for message in messages {
+            await memory.add(message)
+        }
     }
 
     static func makeDefaultMemory() throws -> any Memory {

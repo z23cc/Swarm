@@ -122,7 +122,7 @@ The documentation improvement initiative has been **successfully completed**, ex
 | Quick Start | Updated to use unlabeled instructions parameter with `@ToolBuilder` |
 | Examples | All code examples updated to V3 API |
 | Guardrails | Fixed to use `GuardrailSpec` static factory methods |
-| Memory | Fixed examples to use `MemoryOption` dot-syntax |
+| Memory | Fixed examples to use `Memory` dot-syntax factories |
 | Durable Workflows | Fixed to use `.durable` namespace correctly |
 | What's Included | Removed deprecated types, added `Conversation` |
 | Install | Updated package version to 0.4.0 |
