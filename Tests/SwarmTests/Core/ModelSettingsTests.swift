@@ -348,6 +348,21 @@ struct ModelSettingsCodableTests {
         #expect(decoded.providerSettings?["intKey"] == .int(42))
         #expect(decoded.providerSettings?["boolKey"] == .bool(true))
     }
+
+    @Test("ModelSettings encoding and decoding with reasoning")
+    func codableWithReasoning() throws {
+        let original = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .high, maxTokens: 4096, exclude: true, enabled: false))
+
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ModelSettings.self, from: encoded)
+
+        #expect(decoded == original)
+        #expect(decoded.reasoning?.effort == .high)
+        #expect(decoded.reasoning?.maxTokens == 4096)
+        #expect(decoded.reasoning?.exclude == true)
+        #expect(decoded.reasoning?.enabled == false)
+    }
 }
 
 // MARK: - ModelSettingsEquatableTests
@@ -386,6 +401,22 @@ struct ModelSettingsEquatableTests {
         #expect(ModelSettings.creative != ModelSettings.precise)
         #expect(ModelSettings.precise != ModelSettings.balanced)
     }
+
+    @Test("Settings with different reasoning are not equal")
+    func differentReasoningNotEqual() {
+        let settings1 = ModelSettings().reasoning(ReasoningConfig(effort: .low))
+        let settings2 = ModelSettings().reasoning(ReasoningConfig(effort: .high))
+
+        #expect(settings1 != settings2)
+    }
+
+    @Test("Settings with same reasoning are equal")
+    func sameReasoningEqual() {
+        let settings1 = ModelSettings().reasoning(ReasoningConfig(effort: .medium, maxTokens: 2048))
+        let settings2 = ModelSettings().reasoning(ReasoningConfig(effort: .medium, maxTokens: 2048))
+
+        #expect(settings1 == settings2)
+    }
 }
 
 // MARK: - ModelSettingsDescriptionTests
@@ -406,5 +437,13 @@ struct ModelSettingsDescriptionTests {
 
         #expect(settings.description.contains("temperature: 0.8"))
         #expect(settings.description.contains("maxTokens: 1024"))
+    }
+
+    @Test("Settings with reasoning includes reasoning in description")
+    func descriptionWithReasoning() {
+        let settings = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .low, maxTokens: 4096))
+
+        #expect(settings.description.contains("reasoning:"))
     }
 }

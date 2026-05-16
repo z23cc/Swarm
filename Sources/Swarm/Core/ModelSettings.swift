@@ -569,6 +569,7 @@ extension ModelSettings: CustomStringConvertible {
         if let repetitionPenalty { parts.append("repetitionPenalty: \(repetitionPenalty)") }
         if let minP { parts.append("minP: \(minP)") }
         if let providerSettings { parts.append("providerSettings: \(providerSettings)") }
+        if let reasoning { parts.append("reasoning: \(reasoning)") }
 
         if parts.isEmpty {
             return "ModelSettings(default)"
