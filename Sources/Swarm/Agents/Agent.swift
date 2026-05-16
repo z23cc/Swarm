@@ -21,8 +21,8 @@ import Foundation
 /// 1. Apple Foundation Models when `inferencePolicy.privacyRequired` is true
 /// 2. An explicit provider passed to `Agent(...)` (including `Agent(_:)`)
 /// 3. A provider set via `.environment(\.inferenceProvider, ...)`
-/// 4. `Swarm.defaultProvider` (set via `Swarm.configure(provider:)`)
-/// 5. `Swarm.cloudProvider` (set via `Swarm.configure(cloudProvider:)`, when tool calling is required)
+/// 4. `Swarm.cloudProvider` (set via `Swarm.configure(cloudProvider:)`, when tool calling is required)
+/// 5. `Swarm.defaultProvider` (set via `Swarm.configure(provider:)`)
 /// 6. Apple Foundation Models (on-device), if available, including prompt-based tool emulation
 /// 7. Otherwise, throw `AgentError.inferenceProviderUnavailable`
 ///
@@ -131,8 +131,8 @@ public struct Agent: AgentRuntime, Sendable {
     /// 1. Apple Foundation Models when `configuration.inferencePolicy.privacyRequired` is true
     /// 2. Explicit provider passed to ``Agent`` initialization
     /// 3. Provider set via `.environment(\.inferenceProvider, ...)`
-    /// 4. ``Swarm/defaultProvider`` (configured via `Swarm.configure(provider:)`)
-    /// 5. ``Swarm/cloudProvider`` (configured via `Swarm.configure(cloudProvider:)`)
+    /// 4. ``Swarm/cloudProvider`` (configured via `Swarm.configure(cloudProvider:)`, when tool calling is required)
+    /// 5. ``Swarm/defaultProvider`` (configured via `Swarm.configure(provider:)`)
     /// 6. Apple Foundation Models (on-device), if available
     /// 7. Throws ``AgentError/inferenceProviderUnavailable``
     ///
@@ -992,16 +992,16 @@ public struct Agent: AgentRuntime, Sendable {
             return transformedInferenceProvider(environmentProvider)
         }
 
-        // 3. Swarm.defaultProvider (global)
-        if let globalProvider = await Swarm.defaultProvider {
-            return transformedInferenceProvider(globalProvider)
-        }
-
-        // 4. Swarm.cloudProvider (if tool calling is required)
+        // 3. Swarm.cloudProvider (if tool calling is required)
         let hasEnabledTools = await !toolRegistry.schemas.isEmpty
         let needsToolCallingProvider = hasEnabledTools || !_handoffs.isEmpty
         if needsToolCallingProvider, let cloudProvider = await Swarm.cloudProvider {
             return transformedInferenceProvider(cloudProvider)
+        }
+
+        // 4. Swarm.defaultProvider (global)
+        if let globalProvider = await Swarm.defaultProvider {
+            return transformedInferenceProvider(globalProvider)
         }
 
         // 5. Foundation Models (if available, on Apple platform)
