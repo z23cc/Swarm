@@ -151,6 +151,58 @@ struct HTTPMCPServerRetryTests {
         #expect(!values.isRequired)
         #expect(values.type == .array(elementType: .string))
     }
+
+    @Test("Call tool treats MCP isError result as execution failure")
+    func callToolTreatsIsErrorResultAsExecutionFailure() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: config)
+
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+
+        MockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "https://mcp.example.com/api")!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            let body: [String: Any] = [
+                "jsonrpc": "2.0",
+                "id": "tool-call",
+                "result": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": "remote tool failed"
+                        ]
+                    ],
+                    "isError": true
+                ]
+            ]
+            return (response, try JSONSerialization.data(withJSONObject: body))
+        }
+
+        let server = try HTTPMCPServer(
+            url: URL(string: "https://mcp.example.com/api")!,
+            name: "tool-error-test",
+            maxRetries: 0,
+            session: session
+        )
+
+        do {
+            _ = try await server.callTool(name: "explode", arguments: [:])
+            Issue.record("Expected remote isError tool result to throw")
+        } catch let error as MCPError {
+            #expect(error.code == MCPError.internalErrorCode)
+            #expect(error.message.contains("explode"))
+            #expect(error.message.contains("remote tool failed"))
+            #expect(error.data?.dictionaryValue?["isError"]?.boolValue == true)
+        } catch {
+            Issue.record("Expected MCPError, got \(error)")
+        }
+    }
 }
 
 private final class MockURLProtocol: URLProtocol {

@@ -180,6 +180,7 @@ public actor HTTPMCPServer: MCPServer {
             throw MCPError.internalError("No result in tools/call response")
         }
 
+        try validateToolCallResult(result, toolName: name)
         return result
     }
 
@@ -665,6 +666,35 @@ public actor HTTPMCPServer: MCPServer {
             text: text,
             blob: blob
         )
+    }
+
+    private func validateToolCallResult(_ result: SendableValue, toolName: String) throws {
+        guard let resultDict = result.dictionaryValue,
+              resultDict["isError"]?.boolValue == true else {
+            return
+        }
+
+        let detail = toolCallErrorMessage(from: resultDict)
+        throw MCPError(
+            code: MCPError.internalErrorCode,
+            message: "Remote MCP tool '\(toolName)' failed: \(detail)",
+            data: result
+        )
+    }
+
+    private func toolCallErrorMessage(from resultDict: [String: SendableValue]) -> String {
+        guard let content = resultDict["content"]?.arrayValue else {
+            return "tool returned isError"
+        }
+
+        let textParts = content.compactMap { item -> String? in
+            guard let itemDict = item.dictionaryValue else {
+                return nil
+            }
+            return itemDict["text"]?.stringValue
+        }
+
+        return textParts.isEmpty ? "tool returned isError" : textParts.joined(separator: "\n")
     }
 
     /// Extracts a string from a SendableValue.
