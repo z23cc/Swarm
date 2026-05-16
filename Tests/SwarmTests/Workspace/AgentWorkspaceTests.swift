@@ -106,6 +106,123 @@ struct AgentWorkspaceTests {
         #expect(prompt?.contains("Local agent instructions.") == true)
     }
 
+    @Test("Workspace agents layer workspace context with default memory")
+    func workspaceAgentsLayerWorkspaceContextWithDefaultMemory() async throws {
+        let workspaceRoot = try makeWorkspaceRoot()
+        defer { try? FileManager.default.removeItem(at: workspaceRoot) }
+
+        let workspace = try AgentWorkspace(
+            bundleRoot: workspaceRoot,
+            writableRoot: workspaceRoot.appendingPathComponent("Writable", isDirectory: true),
+            indexCacheRoot: workspaceRoot.appendingPathComponent("Cache", isDirectory: true)
+        )
+        _ = try await workspace.makeWriter().recordFact(
+            title: "Refund Window",
+            content: "Workspace refunds use the blue-lantern refund marker."
+        )
+
+        let agent = try Agent.onDevice(
+            "Local agent instructions.",
+            workspace: workspace,
+            configuration: AgentConfiguration(name: "workspace-memory", defaultTracingEnabled: false),
+            inferenceProvider: MockInferenceProvider(responses: ["ok"])
+        )
+
+        #expect(agent.memory != nil)
+        guard let memory = agent.memory else { return }
+
+        await memory.add(.user("Default memory remembers the ember-archive marker."))
+
+        let context = await memory.context(for: "refund ember archive", tokenLimit: 600)
+        #expect(context.contains("blue-lantern refund marker"))
+        #expect(context.contains("ember-archive marker"))
+    }
+
+    @Test("Workspace agents seed session history into the default memory layer")
+    func workspaceAgentsSeedSessionHistoryIntoDefaultMemoryLayer() async throws {
+        let workspaceRoot = try makeWorkspaceRoot()
+        defer { try? FileManager.default.removeItem(at: workspaceRoot) }
+
+        let workspace = try AgentWorkspace(
+            bundleRoot: workspaceRoot,
+            writableRoot: workspaceRoot.appendingPathComponent("Writable", isDirectory: true),
+            indexCacheRoot: workspaceRoot.appendingPathComponent("Cache", isDirectory: true)
+        )
+        _ = try await workspace.makeWriter().recordFact(
+            title: "Workspace Fact",
+            content: "Workspace memory includes the copper-lake marker."
+        )
+
+        let session = InMemorySession(sessionId: "workspace-seed")
+        try await session.addItems([
+            .user("Session history includes the violet-signal marker.")
+        ])
+
+        let agent = try Agent.onDevice(
+            "Local agent instructions.",
+            workspace: workspace,
+            configuration: AgentConfiguration(name: "workspace-seed", defaultTracingEnabled: false),
+            inferenceProvider: MockInferenceProvider(responses: ["ok"])
+        )
+
+        _ = try await agent.run("Use the remembered context.", session: session)
+
+        guard let memory = agent.memory else {
+            Issue.record("workspace agent should expose layered memory")
+            return
+        }
+
+        let context = await memory.context(for: "copper violet signal", tokenLimit: 800)
+        #expect(context.contains("copper-lake marker"))
+        #expect(context.contains("violet-signal marker"))
+    }
+
+    @Test("Workspace agents isolate default memory when switching sessions")
+    func workspaceAgentsIsolateDefaultMemoryWhenSwitchingSessions() async throws {
+        let workspaceRoot = try makeWorkspaceRoot()
+        defer { try? FileManager.default.removeItem(at: workspaceRoot) }
+
+        let workspace = try AgentWorkspace(
+            bundleRoot: workspaceRoot,
+            writableRoot: workspaceRoot.appendingPathComponent("Writable", isDirectory: true),
+            indexCacheRoot: workspaceRoot.appendingPathComponent("Cache", isDirectory: true)
+        )
+        _ = try await workspace.makeWriter().recordFact(
+            title: "Workspace Fact",
+            content: "Workspace memory includes the silver-branch marker."
+        )
+
+        let firstSession = InMemorySession(sessionId: "workspace-session-a")
+        try await firstSession.addItems([
+            .user("First session includes the amber-session marker.")
+        ])
+
+        let secondSession = InMemorySession(sessionId: "workspace-session-b")
+        try await secondSession.addItems([
+            .user("Second session includes the cobalt-session marker.")
+        ])
+
+        let agent = try Agent.onDevice(
+            "Local agent instructions.",
+            workspace: workspace,
+            configuration: AgentConfiguration(name: "workspace-switch", defaultTracingEnabled: false),
+            inferenceProvider: MockInferenceProvider(responses: ["first", "second"])
+        )
+
+        _ = try await agent.run("First turn.", session: firstSession)
+        _ = try await agent.run("Second turn.", session: secondSession)
+
+        guard let memory = agent.memory else {
+            Issue.record("workspace agent should expose layered memory")
+            return
+        }
+
+        let context = await memory.context(for: "amber cobalt silver branch", tokenLimit: 800)
+        #expect(context.contains("silver-branch marker"))
+        #expect(context.contains("cobalt-session marker"))
+        #expect(!context.contains("amber-session marker"))
+    }
+
     @Test("Agent.spec uses listed SKILL.md content as retrieved context")
     func agentSpecUsesSkillContentAsRetrievedContext() async throws {
         let workspaceRoot = try makeWorkspaceRoot()

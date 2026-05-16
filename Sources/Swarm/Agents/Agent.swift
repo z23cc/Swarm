@@ -827,20 +827,17 @@ public struct Agent: AgentRuntime, Sendable {
             ?? (configuration.defaultTracingEnabled ? SwiftLogTracer(minimumLevel: .debug) : nil)
         let activeMemory = resolvedMemory()
         let lifecycleMemory = activeMemory as? any MemorySessionLifecycle
+        let trackedSessionMemory = activeMemory.flatMap(defaultSessionMemory)
         var defaultMemoryRunKey: ObjectIdentifier?
 
         if let session,
-           let activeMemory,
-           let defaultMemory
+           let trackedSessionMemory
         {
-            let activeMemoryObject = activeMemory as AnyObject
-            let defaultMemoryObject = defaultMemory as AnyObject
-            if activeMemoryObject === defaultMemoryObject {
-                let memoryKey = ObjectIdentifier(activeMemoryObject)
-                defaultMemoryRunKey = memoryKey
-                if try await Self.defaultMemorySessionTracker.beginRun(for: memoryKey, sessionID: session.sessionId) {
-                    await activeMemory.clear()
-                }
+            let trackedMemoryObject = trackedSessionMemory as AnyObject
+            let memoryKey = ObjectIdentifier(trackedMemoryObject)
+            defaultMemoryRunKey = memoryKey
+            if try await Self.defaultMemorySessionTracker.beginRun(for: memoryKey, sessionID: session.sessionId) {
+                await trackedSessionMemory.clear()
             }
         }
 
@@ -884,17 +881,9 @@ public struct Agent: AgentRuntime, Sendable {
             let replayTranscript = SwarmTranscript(memoryMessages: sessionHistory)
             try replayTranscript.validateReplayCompatibility()
 
-            // Seed memory with session history once (only if memory is empty and the memory allows it).
-            let importPolicy = activeMemory as? any MemorySessionImportPolicy
-            let allowsSessionSeeding = importPolicy?.allowsAutomaticSessionSeeding ?? true
-            if let activeMemory, allowsSessionSeeding, !sessionHistory.isEmpty, await activeMemory.isEmpty {
-                if let replayAware = activeMemory as? any MemorySessionReplayAware {
-                    await replayAware.importSessionHistory(sessionHistory)
-                } else {
-                    for message in sessionHistory {
-                        await activeMemory.add(message)
-                    }
-                }
+            // Seed memory with session history once when the memory is eligible.
+            if let activeMemory, session != nil {
+                await activeMemory.seedSessionHistoryIfNeeded(sessionHistory)
             }
 
             // Create user message for this turn
@@ -1113,6 +1102,22 @@ public struct Agent: AgentRuntime, Sendable {
         memory ?? AgentEnvironmentValues.current.memory ?? defaultMemory
     }
 
+    private func defaultSessionMemory(from activeMemory: any Memory) -> (any Memory)? {
+        if let defaultMemory {
+            let activeObject = activeMemory as AnyObject
+            let defaultObject = defaultMemory as AnyObject
+            if activeObject === defaultObject {
+                return defaultMemory
+            }
+        }
+
+        if let trackingProvider = activeMemory as? any MemorySessionTrackingProvider {
+            return trackingProvider.trackedSessionMemory
+        }
+
+        return nil
+    }
+
     private func shouldPersistNoSessionTurn(to activeMemory: any Memory) -> Bool {
         guard let defaultMemory else {
             return false
@@ -1135,7 +1140,7 @@ public struct Agent: AgentRuntime, Sendable {
         }
     }
 
-    private static func makeDefaultMemory() throws -> any Memory {
+    static func makeDefaultMemory() throws -> any Memory {
         if SwarmRuntimeEnvironment.isRunningTests {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("SwarmDefaultMemoryTests", isDirectory: true)

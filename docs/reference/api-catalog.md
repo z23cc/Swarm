@@ -3,7 +3,7 @@
 Generated from `Sources/Swarm/` on 2026-04-30.
 
 - Scope: all `.swift` files under `Sources/Swarm/`, excluding `Internal/GraphRuntime/`
-- Source files scanned: 153
+- Source files scanned: 154
 - Public/open symbols cataloged: 2423
 
 ## 1. Swarm (entry point)
