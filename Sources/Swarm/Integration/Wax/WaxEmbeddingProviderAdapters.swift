@@ -59,6 +59,7 @@ public struct WaxEmbeddingProviderAdapter: WaxVectorSearch.EmbeddingProvider {
     public var dimensions: Int { base.dimensions }
 
     public func embed(_ text: String) async throws -> [Float] {
-        try await base.embed(text)
+        let embedding = try await base.embed(text)
+        return normalize ? EmbeddingUtils.normalize(embedding) : embedding
     }
 }
