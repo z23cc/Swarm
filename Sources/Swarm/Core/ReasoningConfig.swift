@@ -65,3 +65,19 @@ public struct ReasoningConfig: Sendable, Hashable, Codable {
         self.enabled = enabled
     }
 }
+
+// MARK: - CustomStringConvertible
+
+extension ReasoningConfig: CustomStringConvertible {
+    public var description: String {
+        var parts: [String] = []
+        if let effort { parts.append("effort: \(effort.rawValue)") }
+        if let maxTokens { parts.append("maxTokens: \(maxTokens)") }
+        if let exclude { parts.append("exclude: \(exclude)") }
+        if let enabled { parts.append("enabled: \(enabled)") }
+        if parts.isEmpty {
+            return "ReasoningConfig(default)"
+        }
+        return "ReasoningConfig(\(parts.joined(separator: ", ")))"
+    }
+}
