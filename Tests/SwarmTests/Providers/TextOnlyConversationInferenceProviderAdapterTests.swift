@@ -41,6 +41,18 @@ struct TextOnlyConversationInferenceProviderAdapterTests {
         #expect(prompts[0].contains("[User]: hello"))
     }
 
+    @Test("Text-only conversation adapter strips streaming tool-call capability")
+    func textOnlyConversationAdapterStripsStreamingToolCallCapability() {
+        let provider = ReportingTextProvider(capabilities: [.streamingToolCalls, .responseContinuation])
+        let adapter = TextOnlyConversationInferenceProviderAdapter(base: provider)
+
+        let capabilities = adapter.capabilities
+
+        #expect(capabilities.contains(.conversationMessages))
+        #expect(capabilities.contains(.responseContinuation))
+        #expect(capabilities.contains(.streamingToolCalls) == false)
+    }
+
     @Test("Agent completes tool loops with text-only providers")
     func agentCompletesToolLoopsWithTextOnlyProviders() async throws {
         let provider = CertifiedTextOnlyProvider(mode: .toolThenAnswer)
@@ -57,5 +69,20 @@ struct TextOnlyConversationInferenceProviderAdapterTests {
         #expect(prompts.count == 2)
         #expect(prompts[0].contains("\"swarm_tool_call\""))
         #expect(prompts[1].contains("[Tool Result - string]: HELLO"))
+    }
+}
+
+private struct ReportingTextProvider: InferenceProvider, CapabilityReportingInferenceProvider {
+    let capabilities: InferenceProviderCapabilities
+
+    func generate(prompt _: String, options _: InferenceOptions) async throws -> String {
+        "ok"
+    }
+
+    func stream(prompt _: String, options _: InferenceOptions) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield("ok")
+            continuation.finish()
+        }
     }
 }
