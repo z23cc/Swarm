@@ -220,6 +220,67 @@ final class ToolMacroTests: XCTestCase {
         #endif
     }
 
+    func testToolParameterLiteralsAreEscaped() throws {
+        #if canImport(SwarmMacros)
+            assertMacroExpansion(
+                #"""
+                @Tool("Finds \"quoted\" text")
+                struct SearchTool {
+                    @Parameter("Search for a \"quoted\" phrase", oneOf: ["exact \"phrase\"", "loose"])
+                    var query: String
+
+                    func execute() async throws -> String {
+                        return query
+                    }
+                }
+                """#,
+                expandedSource: """
+                struct SearchTool {
+                    var query: String
+
+                    func execute() async throws -> String {
+                        return query
+                    }
+
+                    public let name: String = "search"
+
+                    public let description: String = #"Finds "quoted" text"#
+
+                    public let parameters: [ToolParameter] = [
+                                ToolParameter(
+                            name: "query",
+                            description: "Search for a \\"quoted\\" phrase",
+                            type: .oneOf(["exact \\"phrase\\"", "loose"]),
+                            isRequired: true
+                        )
+                        ]
+
+                    public init() {
+                    }
+
+                    public struct Input: Codable, Sendable {
+                        public var query: String
+                    }
+
+                    public typealias Output = String
+
+                    public func execute(_ input: Input) async throws -> Output {
+                        var toolCopy = self
+                        toolCopy.query = input.query
+                        return try await toolCopy.execute()
+                    }
+                }
+
+                extension SearchTool: Tool, Sendable {
+                }
+                """,
+                macros: toolMacros()
+            )
+        #else
+            throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
     func testToolWithIntParameter() throws {
         #if canImport(SwarmMacros)
             assertMacroExpansion(
