@@ -346,6 +346,11 @@ public struct InferenceOptions: Sendable, Equatable {
     /// Optional structured output contract for the request.
     public var structuredOutput: StructuredOutputRequest?
 
+    /// Configuration for extended thinking / reasoning mode (OpenAI o-series,
+    /// OpenRouter `:thinking`, etc.). Without this, reasoning models can run
+    /// unbounded — see one-fhx.
+    public var reasoning: ReasoningConfig?
+
     /// Creates inference options.
     /// - Parameters:
     ///   - temperature: Generation temperature. Default: 1.0
@@ -362,6 +367,7 @@ public struct InferenceOptions: Sendable, Equatable {
     ///   - verbosity: Verbosity preference. Default: nil
     ///   - providerSettings: Provider-specific pass-through settings. Default: nil
     ///   - previousResponseId: Previous response identifier for conversation continuation. Default: nil
+    ///   - reasoning: Reasoning configuration for thinking-capable models. Default: nil
     public init(
         temperature: Double = 1.0,
         maxTokens: Int? = nil,
@@ -377,7 +383,8 @@ public struct InferenceOptions: Sendable, Equatable {
         verbosity: Verbosity? = nil,
         providerSettings: [String: SendableValue]? = nil,
         previousResponseId: String? = nil,
-        structuredOutput: StructuredOutputRequest? = nil
+        structuredOutput: StructuredOutputRequest? = nil,
+        reasoning: ReasoningConfig? = nil
     ) {
         self.temperature = temperature
         self.maxTokens = maxTokens
@@ -394,6 +401,7 @@ public struct InferenceOptions: Sendable, Equatable {
         self.providerSettings = providerSettings
         self.previousResponseId = previousResponseId
         self.structuredOutput = structuredOutput
+        self.reasoning = reasoning
     }
 
     // MARK: - Special Builder Methods

@@ -35,7 +35,8 @@ package extension AgentConfiguration {
                 truncation: settings.truncation,
                 verbosity: settings.verbosity,
                 providerSettings: settings.providerSettings,
-                previousResponseId: previousResponseId
+                previousResponseId: previousResponseId,
+                reasoning: settings.reasoning
             )
         }
 

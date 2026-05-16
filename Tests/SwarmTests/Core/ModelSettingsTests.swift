@@ -252,6 +252,45 @@ struct ModelSettingsMergeTests {
 
         #expect(merged.providerSettings?["key"] == .string("value"))
     }
+
+    // MARK: - Reasoning merge (PR #83 Codex feedback)
+
+    @Test("Merge preserves reasoning from base when override has none")
+    func mergePreservesBaseReasoning() throws {
+        let base = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .high, maxTokens: 4096))
+        let overrides = ModelSettings().temperature(0.5)
+
+        let merged = try base.merged(with: overrides)
+
+        #expect(merged.reasoning?.effort == .high)
+        #expect(merged.reasoning?.maxTokens == 4096)
+        #expect(merged.temperature == 0.5)
+    }
+
+    @Test("Merge prefers override reasoning over base")
+    func mergePrefersOverrideReasoning() throws {
+        let base = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .low))
+        let overrides = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .xhigh, maxTokens: 8192))
+
+        let merged = try base.merged(with: overrides)
+
+        #expect(merged.reasoning?.effort == .xhigh)
+        #expect(merged.reasoning?.maxTokens == 8192)
+    }
+
+    @Test("Merge keeps reasoning from override when base has none")
+    func mergeAddsOverrideReasoning() throws {
+        let base = ModelSettings().temperature(0.7)
+        let overrides = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .medium))
+
+        let merged = try base.merged(with: overrides)
+
+        #expect(merged.reasoning?.effort == .medium)
+    }
 }
 
 // MARK: - ModelSettingsCodableTests
