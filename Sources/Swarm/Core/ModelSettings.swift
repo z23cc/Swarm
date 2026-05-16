@@ -155,6 +155,14 @@ public struct ModelSettings: Sendable, Equatable {
     /// ```
     public var providerSettings: [String: SendableValue]?
 
+    /// Configuration for extended thinking / reasoning mode.
+    ///
+    /// Used by OpenAI o-series, OpenRouter `:thinking`, and similar providers.
+    /// Without this, reasoning models may run unbounded — see one-fhx for the
+    /// production failure mode (gpt-5 returning response_bytes=0 after 800-1000
+    /// reasoning tokens).
+    public var reasoning: ReasoningConfig?
+
     // MARK: - Initialization
 
     /// Creates a new model settings configuration.
@@ -177,7 +185,8 @@ public struct ModelSettings: Sendable, Equatable {
         promptCacheRetention: CacheRetention? = nil,
         repetitionPenalty: Double? = nil,
         minP: Double? = nil,
-        providerSettings: [String: SendableValue]? = nil
+        providerSettings: [String: SendableValue]? = nil,
+        reasoning: ReasoningConfig? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -195,6 +204,7 @@ public struct ModelSettings: Sendable, Equatable {
         self.repetitionPenalty = repetitionPenalty
         self.minP = minP
         self.providerSettings = providerSettings
+        self.reasoning = reasoning
     }
 }
 
@@ -299,6 +309,12 @@ public extension ModelSettings {
                 throw ModelSettingsValidationError.invalidRepetitionPenalty(repetitionPenalty)
             }
         }
+
+        if let reasoningMaxTokens = reasoning?.maxTokens {
+            guard reasoningMaxTokens > 0 else {
+                throw ModelSettingsValidationError.invalidReasoningMaxTokens(reasoningMaxTokens)
+            }
+        }
     }
 }
 
@@ -345,7 +361,8 @@ public extension ModelSettings {
             promptCacheRetention: other.promptCacheRetention ?? promptCacheRetention,
             repetitionPenalty: other.repetitionPenalty ?? repetitionPenalty,
             minP: other.minP ?? minP,
-            providerSettings: mergeProviderSettings(with: other.providerSettings)
+            providerSettings: mergeProviderSettings(with: other.providerSettings),
+            reasoning: other.reasoning ?? reasoning
         )
 
         // Validate the merged settings to catch invalid combinations
@@ -390,6 +407,8 @@ public enum ModelSettingsValidationError: Error, Sendable, LocalizedError {
             "Invalid minP \(value): must be a finite number between 0.0 and 1.0"
         case let .invalidRepetitionPenalty(value):
             "Invalid repetitionPenalty \(value): must be a finite number >= 0.0"
+        case let .invalidReasoningMaxTokens(value):
+            "Invalid reasoning maxTokens \(value): must be greater than 0"
         }
     }
 
@@ -416,6 +435,9 @@ public enum ModelSettingsValidationError: Error, Sendable, LocalizedError {
 
     /// Repetition penalty must be a finite number >= 0.0.
     case invalidRepetitionPenalty(Double)
+
+    /// Reasoning max tokens must be greater than 0.
+    case invalidReasoningMaxTokens(Int)
 }
 
 // MARK: - ToolChoice
@@ -547,6 +569,7 @@ extension ModelSettings: CustomStringConvertible {
         if let repetitionPenalty { parts.append("repetitionPenalty: \(repetitionPenalty)") }
         if let minP { parts.append("minP: \(minP)") }
         if let providerSettings { parts.append("providerSettings: \(providerSettings)") }
+        if let reasoning { parts.append("reasoning: \(reasoning)") }
 
         if parts.isEmpty {
             return "ModelSettings(default)"

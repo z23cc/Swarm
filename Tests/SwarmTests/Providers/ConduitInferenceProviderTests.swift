@@ -71,4 +71,5 @@ struct ConduitInferenceProviderBridgeTests {
         #expect(parsed.arguments["query"]?.stringValue == "swift")
         #expect(parsed.arguments["limit"]?.intValue == 3)
     }
+
 }

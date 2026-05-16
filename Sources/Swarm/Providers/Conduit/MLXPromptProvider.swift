@@ -81,11 +81,24 @@ private struct MLXPromptProvider: Sendable, InferenceProvider {
             updated = updated.responseFormat(try conduitResponseFormat(from: structuredOutput.format))
         }
 
+        if let reasoning = options.reasoning {
+            updated = updated.reasoning(conduitReasoning(from: reasoning))
+        }
+
         if let providerSettings = options.providerSettings, !providerSettings.isEmpty {
             updated = try applyProviderRuntimeSettings(providerSettings, to: updated)
         }
 
         return updated
+    }
+
+    private static func conduitReasoning(from reasoning: ReasoningConfig) -> ConduitAdvanced.ReasoningConfig {
+        ConduitAdvanced.ReasoningConfig(
+            effort: reasoning.effort.flatMap { ConduitAdvanced.ReasoningEffort(rawValue: $0.rawValue) },
+            maxTokens: reasoning.maxTokens,
+            exclude: reasoning.exclude,
+            enabled: reasoning.enabled
+        )
     }
 
     private static func applyProviderRuntimeSettings(

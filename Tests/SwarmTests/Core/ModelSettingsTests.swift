@@ -36,6 +36,7 @@ struct ModelSettingsInitializationTests {
         #expect(settings.repetitionPenalty == nil)
         #expect(settings.minP == nil)
         #expect(settings.providerSettings == nil)
+        #expect(settings.reasoning == nil)
     }
 
     @Test("Static default preset - all values are nil")
@@ -46,6 +47,7 @@ struct ModelSettingsInitializationTests {
         #expect(settings.topP == nil)
         #expect(settings.topK == nil)
         #expect(settings.maxTokens == nil)
+        #expect(settings.reasoning == nil)
     }
 
     @Test("Static creative preset - temperature 1.2, topP 0.95")
@@ -252,6 +254,56 @@ struct ModelSettingsMergeTests {
 
         #expect(merged.providerSettings?["key"] == .string("value"))
     }
+
+    // MARK: - Reasoning merge (PR #83 Codex feedback)
+
+    @Test("Merge preserves reasoning from base when override has none")
+    func mergePreservesBaseReasoning() throws {
+        let base = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .high, maxTokens: 4096))
+        let overrides = ModelSettings().temperature(0.5)
+
+        let merged = try base.merged(with: overrides)
+
+        #expect(merged.reasoning?.effort == .high)
+        #expect(merged.reasoning?.maxTokens == 4096)
+        #expect(merged.temperature == 0.5)
+    }
+
+    @Test("Merge prefers override reasoning over base")
+    func mergePrefersOverrideReasoning() throws {
+        let base = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .low))
+        let overrides = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .xhigh, maxTokens: 8192))
+
+        let merged = try base.merged(with: overrides)
+
+        #expect(merged.reasoning?.effort == .xhigh)
+        #expect(merged.reasoning?.maxTokens == 8192)
+    }
+
+    @Test("Merge keeps reasoning from override when base has none")
+    func mergeAddsOverrideReasoning() throws {
+        let base = ModelSettings().temperature(0.7)
+        let overrides = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .medium))
+
+        let merged = try base.merged(with: overrides)
+
+        #expect(merged.reasoning?.effort == .medium)
+    }
+
+    @Test("Merge with invalid reasoning maxTokens throws")
+    func mergeInvalidReasoningThrows() {
+        let base = ModelSettings().temperature(0.5)
+        let overrides = ModelSettings()
+            .reasoning(ReasoningConfig(maxTokens: 0))
+
+        #expect(throws: ModelSettingsValidationError.self) {
+            try base.merged(with: overrides)
+        }
+    }
 }
 
 // MARK: - ModelSettingsCodableTests
@@ -309,6 +361,21 @@ struct ModelSettingsCodableTests {
         #expect(decoded.providerSettings?["intKey"] == .int(42))
         #expect(decoded.providerSettings?["boolKey"] == .bool(true))
     }
+
+    @Test("ModelSettings encoding and decoding with reasoning")
+    func codableWithReasoning() throws {
+        let original = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .high, maxTokens: 4096, exclude: true, enabled: false))
+
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ModelSettings.self, from: encoded)
+
+        #expect(decoded == original)
+        #expect(decoded.reasoning?.effort == .high)
+        #expect(decoded.reasoning?.maxTokens == 4096)
+        #expect(decoded.reasoning?.exclude == true)
+        #expect(decoded.reasoning?.enabled == false)
+    }
 }
 
 // MARK: - ModelSettingsEquatableTests
@@ -347,6 +414,22 @@ struct ModelSettingsEquatableTests {
         #expect(ModelSettings.creative != ModelSettings.precise)
         #expect(ModelSettings.precise != ModelSettings.balanced)
     }
+
+    @Test("Settings with different reasoning are not equal")
+    func differentReasoningNotEqual() {
+        let settings1 = ModelSettings().reasoning(ReasoningConfig(effort: .low))
+        let settings2 = ModelSettings().reasoning(ReasoningConfig(effort: .high))
+
+        #expect(settings1 != settings2)
+    }
+
+    @Test("Settings with same reasoning are equal")
+    func sameReasoningEqual() {
+        let settings1 = ModelSettings().reasoning(ReasoningConfig(effort: .medium, maxTokens: 2048))
+        let settings2 = ModelSettings().reasoning(ReasoningConfig(effort: .medium, maxTokens: 2048))
+
+        #expect(settings1 == settings2)
+    }
 }
 
 // MARK: - ModelSettingsDescriptionTests
@@ -367,5 +450,13 @@ struct ModelSettingsDescriptionTests {
 
         #expect(settings.description.contains("temperature: 0.8"))
         #expect(settings.description.contains("maxTokens: 1024"))
+    }
+
+    @Test("Settings with reasoning includes reasoning in description")
+    func descriptionWithReasoning() {
+        let settings = ModelSettings()
+            .reasoning(ReasoningConfig(effort: .low, maxTokens: 4096))
+
+        #expect(settings.description.contains("reasoning: ReasoningConfig("))
     }
 }
