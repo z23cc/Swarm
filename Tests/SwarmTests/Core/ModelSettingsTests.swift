@@ -36,6 +36,7 @@ struct ModelSettingsInitializationTests {
         #expect(settings.repetitionPenalty == nil)
         #expect(settings.minP == nil)
         #expect(settings.providerSettings == nil)
+        #expect(settings.reasoning == nil)
     }
 
     @Test("Static default preset - all values are nil")
@@ -46,6 +47,7 @@ struct ModelSettingsInitializationTests {
         #expect(settings.topP == nil)
         #expect(settings.topK == nil)
         #expect(settings.maxTokens == nil)
+        #expect(settings.reasoning == nil)
     }
 
     @Test("Static creative preset - temperature 1.2, topP 0.95")
@@ -291,6 +293,17 @@ struct ModelSettingsMergeTests {
 
         #expect(merged.reasoning?.effort == .medium)
     }
+
+    @Test("Merge with invalid reasoning maxTokens throws")
+    func mergeInvalidReasoningThrows() {
+        let base = ModelSettings().temperature(0.5)
+        let overrides = ModelSettings()
+            .reasoning(ReasoningConfig(maxTokens: 0))
+
+        #expect(throws: ModelSettingsValidationError.self) {
+            try base.merged(with: overrides)
+        }
+    }
 }
 
 // MARK: - ModelSettingsCodableTests
@@ -444,6 +457,6 @@ struct ModelSettingsDescriptionTests {
         let settings = ModelSettings()
             .reasoning(ReasoningConfig(effort: .low, maxTokens: 4096))
 
-        #expect(settings.description.contains("reasoning:"))
+        #expect(settings.description.contains("reasoning: ReasoningConfig("))
     }
 }

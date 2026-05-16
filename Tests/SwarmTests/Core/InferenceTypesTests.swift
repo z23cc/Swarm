@@ -479,4 +479,44 @@ struct InferenceResponseTests {
         #expect(response.content == nil)
         #expect(response.finishReason == .contentFilter)
     }
+
+    // MARK: - ReasoningConfig Tests (PR #83)
+
+    @Test("InferenceOptions initialization with reasoning")
+    func initializationWithReasoning() {
+        let reasoning = ReasoningConfig(effort: .low, maxTokens: 4096, exclude: true)
+        let options = InferenceOptions(reasoning: reasoning)
+
+        #expect(options.reasoning?.effort == .low)
+        #expect(options.reasoning?.maxTokens == 4096)
+        #expect(options.reasoning?.exclude == true)
+    }
+
+    @Test("InferenceOptions default reasoning is nil")
+    func defaultReasoningIsNil() {
+        let options = InferenceOptions.default
+        #expect(options.reasoning == nil)
+    }
+
+    @Test("InferenceOptions equality with reasoning")
+    func equatableWithReasoning() {
+        let options1 = InferenceOptions(reasoning: ReasoningConfig(effort: .high))
+        let options2 = InferenceOptions(reasoning: ReasoningConfig(effort: .high))
+        let options3 = InferenceOptions(reasoning: ReasoningConfig(effort: .low))
+
+        #expect(options1 == options2)
+        #expect(options1 != options3)
+    }
+
+    @Test("InferenceOptions with reasoning preserves values")
+    func preservesReasoningValues() {
+        let original = InferenceOptions(
+            temperature: 0.7,
+            maxTokens: 1000,
+            reasoning: ReasoningConfig(effort: .medium, maxTokens: 2048)
+        )
+
+        #expect(original.reasoning?.effort == .medium)
+        #expect(original.reasoning?.maxTokens == 2048)
+    }
 }

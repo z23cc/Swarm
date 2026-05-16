@@ -82,13 +82,35 @@ struct ReasoningConfigCodableTests {
 
     @Test("Encoding and decoding with ReasoningEffort.none")
     func codableWithNoneEffort() throws {
-        let original = ReasoningConfig(effort: .none)
+        let original = ReasoningConfig(effort: ReasoningEffort.none)
 
         let encoded = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(ReasoningConfig.self, from: encoded)
 
-        #expect(decoded.effort == .none)
+        #expect(decoded.effort == ReasoningEffort.none)
         #expect(decoded == original)
+    }
+
+    @Test("Decoding partial JSON with only effort set")
+    func decodePartialJSON() throws {
+        let json = #"{"effort":"high"}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(ReasoningConfig.self, from: json)
+
+        #expect(decoded.effort == .high)
+        #expect(decoded.maxTokens == nil)
+        #expect(decoded.exclude == nil)
+        #expect(decoded.enabled == nil)
+    }
+
+    @Test("Decoding partial JSON with only maxTokens set")
+    func decodePartialJSONMaxTokens() throws {
+        let json = #"{"maxTokens":2048}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(ReasoningConfig.self, from: json)
+
+        #expect(decoded.effort == nil)
+        #expect(decoded.maxTokens == 2048)
+        #expect(decoded.exclude == nil)
+        #expect(decoded.enabled == nil)
     }
 }
 
@@ -118,6 +140,14 @@ struct ReasoningConfigEquatableTests {
         let config2 = ReasoningConfig(maxTokens: 2000)
 
         #expect(config1 != config2)
+    }
+
+    @Test("Equal configs have equal hash values")
+    func equalHashValues() {
+        let config1 = ReasoningConfig(effort: .high, maxTokens: 4096)
+        let config2 = ReasoningConfig(effort: .high, maxTokens: 4096)
+
+        #expect(config1.hashValue == config2.hashValue)
     }
 }
 
