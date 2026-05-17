@@ -1,6 +1,8 @@
 import Foundation
+#if SWARM_INTEGRATIONS
 import Membrane
 import MembraneHive
+#endif
 
 public struct MembraneFeatureConfiguration: Sendable, Equatable {
     public static let `default` = MembraneFeatureConfiguration()
@@ -103,6 +105,7 @@ public protocol MembraneAgentAdapter: Sendable {
     func snapshotCheckpointData() async throws -> Data?
 }
 
+#if SWARM_INTEGRATIONS
 public actor DefaultMembraneAgentAdapter: MembraneAgentAdapter {
     public init(configuration: MembraneFeatureConfiguration = .default) {
         self.configuration = configuration
@@ -397,3 +400,37 @@ public actor DefaultMembraneAgentAdapter: MembraneAgentAdapter {
         let usageCounts: [String: Int]
     }
 }
+#else
+public actor DefaultMembraneAgentAdapter: MembraneAgentAdapter {
+    public init(configuration _: MembraneFeatureConfiguration = .default) {}
+
+    public func plan(
+        prompt: String,
+        toolSchemas: [ToolSchema],
+        profile _: ContextProfile
+    ) async throws -> MembranePlannedBoundary {
+        MembranePlannedBoundary(prompt: prompt, toolSchemas: toolSchemas, mode: "disabled")
+    }
+
+    public func transformToolResult(
+        toolName _: String,
+        output: String,
+        profile _: ContextProfile = .balanced
+    ) async throws -> MembraneToolResultBoundary {
+        MembraneToolResultBoundary(textForConversation: output)
+    }
+
+    public func handleInternalToolCall(
+        name _: String,
+        arguments _: [String: SendableValue]
+    ) async throws -> String? {
+        nil
+    }
+
+    public func restore(checkpointData _: Data?) async throws {}
+
+    public func snapshotCheckpointData() async throws -> Data? {
+        nil
+    }
+}
+#endif

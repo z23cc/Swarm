@@ -6,7 +6,7 @@ let package = Package(
     name: "CodeReviewer",
     platforms: [.macOS(.v26)],
     dependencies: [
-        .package(path: "../../")
+        .package(name: "Swarm", path: "../../")
     ],
     targets: [
         .executableTarget(

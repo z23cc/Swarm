@@ -345,7 +345,15 @@ for message in await conversation.messages {
 | tvOS     | 26.0+   |
 | Linux    | Ubuntu 22.04+ with Swift 6.2 |
 
-Foundation Models require iOS 26 / macOS 26. Cloud providers work on any Swift 6.2 platform including Linux.
+Foundation Models require iOS 26 / macOS 26. Linux CI verifies the core
+`Swarm` and `SwarmMCP` build lane with:
+
+```bash
+scripts/ci/verify-linux-core.sh
+```
+
+Provider availability on Linux depends on the selected provider package and its
+published dependency graph.
 
 ## Documentation
 
