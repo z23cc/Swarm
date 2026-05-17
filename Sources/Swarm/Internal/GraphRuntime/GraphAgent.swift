@@ -441,7 +441,7 @@ struct GraphAgent: AgentRuntime, Sendable {
 
             for message in messages where !message.toolCalls.isEmpty {
                 for hiveToolCall in message.toolCalls {
-                    let swarmID = UUID()
+                    let swarmID = Self.stableUUID(for: hiveToolCall.id)
                     hiveToSwarmID[hiveToolCall.id] = swarmID
                     let toolCall = ToolCall(
                         id: swarmID,
