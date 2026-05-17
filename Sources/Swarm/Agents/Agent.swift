@@ -2114,10 +2114,35 @@ public struct Agent: AgentRuntime, Sendable {
             // Check if this is a handoff tool call
             if let handoffConfig = handoffMap[parsedCall.name] {
                 if let when = handoffConfig.when, await !when(context, handoffConfig.targetAgent) {
-                    throw AgentError.toolExecutionFailed(
+                    let message = "Handoff is not enabled"
+                    let handoffCall = ToolCall(
+                        providerCallId: parsedCall.id,
                         toolName: parsedCall.name,
-                        underlyingError: "Handoff is not enabled"
+                        arguments: parsedCall.arguments
                     )
+                    _ = resultBuilder.addToolCall(handoffCall)
+                    let result = ToolResult.failure(callId: handoffCall.id, error: message, duration: .zero)
+                    _ = resultBuilder.addToolResult(result)
+
+                    if configuration.stopOnToolError {
+                        throw AgentError.toolExecutionFailed(toolName: parsedCall.name, underlyingError: message)
+                    }
+
+                    let toolError = "[TOOL ERROR] Execution failed: \(message). Please try a different approach or tool."
+                    conversationHistory.append(.toolResult(
+                        toolName: parsedCall.name,
+                        result: toolError,
+                        toolCallID: parsedCall.id
+                    ))
+                    transcriptMessages.append(
+                        SwarmTranscriptCodec.encodeMessage(
+                            role: .tool,
+                            content: toolError,
+                            toolName: parsedCall.name,
+                            toolCallID: parsedCall.id
+                        )
+                    )
+                    continue
                 }
 
                 let reason = parsedCall.arguments["reason"]?.stringValue ?? ""

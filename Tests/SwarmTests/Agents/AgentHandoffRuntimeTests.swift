@@ -288,6 +288,121 @@ struct AgentHandoffRuntimeTests {
         #expect(handoffResult.isSuccess)
         #expect(handoffResult.output == .string("handled route this"))
     }
+
+    @Test("Disabled handoff tool call is recoverable by default")
+    func disabledHandoffToolCallIsRecoverableByDefault() async throws {
+        let gate = HandoffPredicateGate(isEnabled: true)
+        let provider = GateDisablingToolCallProvider(gate: gate)
+        let target = RecordingHandoffReceiver(name: "target-agent")
+        let handoff = HandoffConfiguration(
+            targetAgent: target,
+            toolNameOverride: "handoff_to_target",
+            when: { _, _ in await gate.isEnabled }
+        )
+        let agent = try Agent(
+            tools: [],
+            instructions: "Route only when enabled.",
+            configuration: AgentConfiguration(name: "source-agent", defaultTracingEnabled: false),
+            inferenceProvider: provider,
+            handoffs: [AnyHandoffConfiguration(handoff)]
+        )
+
+        let result = try await agent.run("do not route")
+
+        #expect(result.output == "recovered")
+        #expect(await target.runInputs.isEmpty)
+        #expect(await target.handoffRequests.isEmpty)
+
+        let handoffCall = try #require(result.toolCalls.first)
+        #expect(handoffCall.toolName == "handoff_to_target")
+        #expect(handoffCall.providerCallId == "call_disabled_handoff")
+
+        let handoffResult = try #require(result.toolResults.first)
+        #expect(!handoffResult.isSuccess)
+        #expect(handoffResult.errorMessage == "Handoff is not enabled")
+    }
+}
+
+private actor HandoffPredicateGate {
+    private(set) var isEnabled: Bool
+
+    init(isEnabled: Bool) {
+        self.isEnabled = isEnabled
+    }
+
+    func disable() {
+        isEnabled = false
+    }
+}
+
+private actor GateDisablingToolCallProvider: InferenceProvider {
+    private let gate: HandoffPredicateGate
+
+    init(gate: HandoffPredicateGate) {
+        self.gate = gate
+    }
+
+    func generate(prompt _: String, options _: InferenceOptions) async throws -> String {
+        "recovered"
+    }
+
+    nonisolated func stream(prompt _: String, options _: InferenceOptions) -> AsyncThrowingStream<String, Error> {
+        StreamHelper.makeTrackedStream { continuation in
+            continuation.yield("recovered")
+            continuation.finish()
+        }
+    }
+
+    func generateWithToolCalls(
+        prompt _: String,
+        tools _: [ToolSchema],
+        options _: InferenceOptions
+    ) async throws -> InferenceResponse {
+        await gate.disable()
+        return disabledHandoffToolCallResponse()
+    }
+
+    func generate(messages _: [InferenceMessage], options _: InferenceOptions) async throws -> String {
+        "recovered"
+    }
+
+    nonisolated func stream(
+        messages _: [InferenceMessage],
+        options _: InferenceOptions
+    ) -> AsyncThrowingStream<String, Error> {
+        StreamHelper.makeTrackedStream { continuation in
+            continuation.yield("recovered")
+            continuation.finish()
+        }
+    }
+
+    func generateWithToolCalls(
+        messages _: [InferenceMessage],
+        tools _: [ToolSchema],
+        options _: InferenceOptions
+    ) async throws -> InferenceResponse {
+        await gate.disable()
+        return disabledHandoffToolCallResponse()
+    }
+
+    func countTokens(in text: String) async throws -> Int {
+        max(1, text.count)
+    }
+
+    private func disabledHandoffToolCallResponse() -> InferenceResponse {
+        InferenceResponse(
+            content: nil,
+            toolCalls: [
+                InferenceResponse.ParsedToolCall(
+                    id: "call_disabled_handoff",
+                    name: "handoff_to_target",
+                    arguments: ["reason": .string("stale route")]
+                ),
+            ],
+            finishReason: .toolCall,
+            usage: nil
+        )
+    }
 }
 
 private actor RecordingHandoffReceiver: HandoffReceiver {
