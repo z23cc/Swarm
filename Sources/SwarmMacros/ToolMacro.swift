@@ -476,7 +476,7 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
         }
 
         decoded.append(Character(scalar))
-        index = scanIndex
+        index = text.index(after: scanIndex)
         return true
     }
 
