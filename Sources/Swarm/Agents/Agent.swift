@@ -2144,7 +2144,7 @@ public struct Agent: AgentRuntime, Sendable {
                     reason.isEmpty ? "Continue the conversation" : reason
                 }
 
-                let handoffData = HandoffInputData(
+                let initialHandoffData = HandoffInputData(
                     sourceAgentName: name,
                     targetAgentName: targetAgent.name,
                     input: handoffInput,
@@ -2154,15 +2154,24 @@ public struct Agent: AgentRuntime, Sendable {
 
                 if let onTransfer = handoffConfig.onTransfer {
                     do {
-                        try await onTransfer(context, handoffData)
+                        try await onTransfer(context, initialHandoffData)
                     } catch {
                         Log.agents.warning("Handoff onTransfer callback failed for \(parsedCall.name): \(error)")
                     }
                 }
 
+                let handoffData = HandoffInputData(
+                    sourceAgentName: initialHandoffData.sourceAgentName,
+                    targetAgentName: initialHandoffData.targetAgentName,
+                    input: initialHandoffData.input,
+                    context: await context.snapshot,
+                    metadata: initialHandoffData.metadata
+                )
                 let transformedData = handoffConfig.transform?(handoffData) ?? handoffData
                 let requestContext = transformedData.context.merging(transformedData.metadata) { _, new in new }
                 let handoffContext = await context.copy(additionalValues: requestContext)
+                await applyContextValues(requestContext, to: handoffContext)
+                await preserveExecutionPath(from: context, in: handoffContext)
                 if handoffConfig.nestHandoffHistory {
                     await addNestedHandoffHistory(conversationHistory, to: handoffContext)
                 }
@@ -2179,9 +2188,17 @@ public struct Agent: AgentRuntime, Sendable {
                 do {
                     result = try await executeWithinRemainingTimeout(startTime: startTime) {
                         if let receiver = targetAgent as? any HandoffReceiver {
-                            try await receiver.handleHandoff(handoffRequest, context: handoffContext)
+                            return try await receiver.handleHandoff(handoffRequest, context: handoffContext)
                         } else {
-                            try await targetAgent.run(transformedData.input, session: nil, observer: observer)
+                            let handoffSession = try await makeNestedHandoffSession(
+                                from: handoffContext,
+                                enabled: handoffConfig.nestHandoffHistory
+                            )
+                            return try await targetAgent.run(
+                                transformedData.input,
+                                session: handoffSession,
+                                observer: observer
+                            )
                         }
                     }
                 } catch {
@@ -2260,6 +2277,40 @@ public struct Agent: AgentRuntime, Sendable {
         return nil
     }
 
+    private func applyContextValues(
+        _ values: [String: SendableValue],
+        to context: AgentContext
+    ) async {
+        for (key, value) in values {
+            await context.set(key, value: value)
+        }
+    }
+
+    private func preserveExecutionPath(from source: AgentContext, in target: AgentContext) async {
+        let executionPath = await source.getExecutionPath()
+        for agentName in executionPath {
+            await target.recordExecution(agentName: agentName)
+        }
+    }
+
+    private func makeNestedHandoffSession(
+        from context: AgentContext,
+        enabled: Bool
+    ) async throws -> (any Session)? {
+        guard enabled else {
+            return nil
+        }
+
+        let messages = await context.getMessages()
+        guard !messages.isEmpty else {
+            return nil
+        }
+
+        let session = InMemorySession()
+        try await session.addItems(messages)
+        return session
+    }
+
     private func addNestedHandoffHistory(
         _ conversationHistory: [ConversationMessage],
         to context: AgentContext
@@ -2271,6 +2322,9 @@ public struct Agent: AgentRuntime, Sendable {
             case let .user(content):
                 await context.addMessage(SwarmTranscriptCodec.encodeMessage(role: .user, content: content))
             case let .assistant(content, toolCalls):
+                guard toolCalls.isEmpty else {
+                    continue
+                }
                 await context.addMessage(
                     SwarmTranscriptCodec.encodeMessage(
                         role: .assistant,

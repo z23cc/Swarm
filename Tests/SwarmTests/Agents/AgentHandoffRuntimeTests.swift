@@ -62,6 +62,7 @@ struct AgentHandoffRuntimeTests {
             onTransfer: { context, data in
                 await callbackRecorder.recordTransfer(data)
                 await context.set("transfer_seen", value: .string(data.input))
+                await context.set(.originalInput, value: .string("callback-updated-original-input"))
             },
             transform: { data in
                 HandoffInputData(
@@ -104,11 +105,74 @@ struct AgentHandoffRuntimeTests {
         #expect(snapshots.count == 1)
         let snapshot = try #require(snapshots.first)
         #expect(snapshot["transfer_seen"] == .string("please route this"))
+        #expect(snapshot[AgentContextKey.originalInput.rawValue] == .string("callback-updated-original-input"))
+        #expect(snapshot[AgentContextKey.executionPath.rawValue] == .array([.string("source-agent")]))
 
         let nestedMessages = await target.contextMessages
         #expect(nestedMessages.count == 1)
         let messages = try #require(nestedMessages.first)
         #expect(messages.contains { $0.content == "please route this" })
+
+        let paths = await target.executionPaths
+        #expect(paths.first == ["source-agent"])
+    }
+
+    @Test("Nested handoff history is passed to regular Agent targets")
+    func nestedHandoffHistoryIsPassedToRegularAgentTargets() async throws {
+        let sourceProvider = MockInferenceProvider()
+        await sourceProvider.setToolCallResponses([
+            InferenceResponse(
+                content: nil,
+                toolCalls: [
+                    InferenceResponse.ParsedToolCall(
+                        id: "call_handoff",
+                        name: "handoff_to_target",
+                        arguments: ["reason": .string("delegate")]
+                    ),
+                ],
+                finishReason: .toolCall,
+                usage: nil
+            ),
+        ])
+
+        let targetProvider = MockInferenceProvider(responses: ["target done"])
+        let target = try Agent(
+            tools: [],
+            instructions: "Use prior context.",
+            configuration: AgentConfiguration(name: "target-agent", defaultTracingEnabled: false),
+            memory: ConversationMemory(),
+            inferenceProvider: targetProvider
+        )
+        let handoff = HandoffConfiguration(
+            targetAgent: target,
+            toolNameOverride: "handoff_to_target",
+            transform: { data in
+                HandoffInputData(
+                    sourceAgentName: data.sourceAgentName,
+                    targetAgentName: data.targetAgentName,
+                    input: "target-only payload",
+                    context: data.context,
+                    metadata: data.metadata
+                )
+            },
+            nestHandoffHistory: true
+        )
+        let source = try Agent(
+            tools: [],
+            instructions: "Route to target.",
+            configuration: AgentConfiguration(name: "source-agent", defaultTracingEnabled: false),
+            memory: ConversationMemory(),
+            inferenceProvider: sourceProvider,
+            handoffs: [AnyHandoffConfiguration(handoff)]
+        )
+
+        let result = try await source.run("please route this")
+
+        #expect(result.output == "target done")
+        let targetCalls = await targetProvider.generateMessageCalls
+        let messages = try #require(targetCalls.first?.messages)
+        #expect(messages.contains { $0.role == .user && $0.content == "please route this" })
+        #expect(messages.contains { $0.role == .user && $0.content == "target-only payload" })
     }
 
     @Test("Handoff tool call is recorded on parent result")
@@ -170,6 +234,7 @@ private actor RecordingHandoffReceiver: HandoffReceiver {
     private(set) var handoffRequests: [HandoffRequest] = []
     private(set) var contextSnapshots: [[String: SendableValue]] = []
     private(set) var contextMessages: [[MemoryMessage]] = []
+    private(set) var executionPaths: [[String]] = []
 
     init(name: String) {
         configuration = AgentConfiguration(name: name, defaultTracingEnabled: false)
@@ -197,6 +262,7 @@ private actor RecordingHandoffReceiver: HandoffReceiver {
         handoffRequests.append(request)
         contextSnapshots.append(await context.snapshot)
         contextMessages.append(await context.getMessages())
+        executionPaths.append(await context.getExecutionPath())
         return AgentResult(output: "handled \(request.input)")
     }
 }
