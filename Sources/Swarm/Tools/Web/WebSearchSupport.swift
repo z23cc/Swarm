@@ -1265,6 +1265,15 @@ internal struct TavilySearchBackend: Sendable {
 
 internal struct SafeWebFetcher: Sendable {
     let configuration: WebSearchTool.Configuration
+    private let sessionConfiguration: URLSessionConfiguration
+
+    init(
+        configuration: WebSearchTool.Configuration,
+        sessionConfiguration: URLSessionConfiguration = .ephemeral
+    ) {
+        self.configuration = configuration
+        self.sessionConfiguration = sessionConfiguration
+    }
 
     func fetch(
         url: URL,
@@ -1285,15 +1294,17 @@ internal struct SafeWebFetcher: Sendable {
             request.setValue(conditionalLastModified, forHTTPHeaderField: "If-Modified-Since")
         }
 
-        let redirectDelegate = SafeWebFetchRedirectDelegate()
+        let fetchDelegate = SafeWebFetchDelegate()
         let session = URLSession(
-            configuration: .ephemeral,
-            delegate: redirectDelegate,
+            configuration: sessionConfiguration,
+            delegate: fetchDelegate,
             delegateQueue: nil
         )
         defer { session.finishTasksAndInvalidate() }
 
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        (data, response) = try await fetchDelegate.fetch(request, using: session)
         guard let http = response as? HTTPURLResponse else {
             throw AgentError.toolExecutionFailed(toolName: "websearch", underlyingError: "Fetch returned a non-HTTP response")
         }
@@ -1378,20 +1389,152 @@ internal struct SafeWebFetcher: Sendable {
     }
 }
 
-private final class SafeWebFetchRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+private final class SafeWebFetchDelegate: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+    private let state = SafeWebFetchDelegateState()
+
+    func fetch(_ request: URLRequest, using session: URLSession) async throws -> (Data, URLResponse) {
+        let task = session.dataTask(with: request)
+        return try await withCheckedThrowingContinuation { continuation in
+            state.start(continuation)
+            task.resume()
+        }
+    }
+
+    func urlSession(
+        _: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let url = response.url, SafeWebFetcher.isAllowedURL(url) else {
+            state.finish(
+                throwing: AgentError.invalidToolArguments(
+                    toolName: "websearch",
+                    reason: "Private-network hosts are blocked"
+                )
+            )
+            dataTask.cancel()
+            completionHandler(.cancel)
+            return
+        }
+        state.receive(response: response)
+        completionHandler(.allow)
+    }
+
+    func urlSession(
+        _: URLSession,
+        dataTask _: URLSessionDataTask,
+        didReceive data: Data
+    ) {
+        state.receive(data: data)
+    }
+
     func urlSession(
         _: URLSession,
         task _: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        if let error {
+            state.finish(throwing: error)
+        } else {
+            state.finish()
+        }
+    }
+
+    func urlSession(
+        _: URLSession,
+        task: URLSessionTask,
         willPerformHTTPRedirection _: HTTPURLResponse,
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
         guard let url = request.url, SafeWebFetcher.isAllowedURL(url) else {
+            state.finish(
+                throwing: AgentError.invalidToolArguments(
+                    toolName: "websearch",
+                    reason: "Private-network hosts are blocked"
+                )
+            )
+            task.cancel()
             completionHandler(nil)
             return
         }
         completionHandler(request)
     }
+}
+
+private final class SafeWebFetchDelegateState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+    private var response: URLResponse?
+    private var data = Data()
+    private var isFinished = false
+
+    func start(_ continuation: CheckedContinuation<(Data, URLResponse), Error>) {
+        lock.withLock {
+            self.continuation = continuation
+        }
+    }
+
+    func receive(response: URLResponse) {
+        lock.withLock {
+            self.response = response
+        }
+    }
+
+    func receive(data newData: Data) {
+        lock.withLock {
+            data.append(newData)
+        }
+    }
+
+    func finish() {
+        let result: Result<(Data, URLResponse), Error> = lock.withLock {
+            guard isFinished == false else { return .failure(SafeWebFetchCompletion.alreadyFinished) }
+            isFinished = true
+            guard let response else {
+                return .failure(
+                    AgentError.toolExecutionFailed(
+                        toolName: "websearch",
+                        underlyingError: "Fetch returned no response"
+                    )
+                )
+            }
+            return .success((data, response))
+        }
+        resume(with: result)
+    }
+
+    func finish(throwing error: Error) {
+        let result: Result<(Data, URLResponse), Error> = lock.withLock {
+            guard isFinished == false else { return .failure(SafeWebFetchCompletion.alreadyFinished) }
+            isFinished = true
+            return .failure(error)
+        }
+        resume(with: result)
+    }
+
+    private func resume(with result: Result<(Data, URLResponse), Error>) {
+        let continuation = lock.withLock {
+            let current = self.continuation
+            self.continuation = nil
+            return current
+        }
+        guard let continuation else { return }
+        switch result {
+        case let .success(value):
+            continuation.resume(returning: value)
+        case let .failure(error):
+            if (error as? SafeWebFetchCompletion) == .alreadyFinished {
+                return
+            }
+            continuation.resume(throwing: error)
+        }
+    }
+}
+
+private enum SafeWebFetchCompletion: Error {
+    case alreadyFinished
 }
 
 private enum ResolvedHostAddress: Sendable {

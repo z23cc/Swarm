@@ -1,0 +1,32 @@
+# Web Security / Observability Audit Fixes
+
+## Plan
+
+- [x] Baseline the existing dirty web fetch changes and preserve unrelated edits.
+- [x] SWARM-AUDIT-030: add focused redirect/final URL and DNS destination tests, then validate every redirect/final destination before body acceptance.
+- [ ] SWARM-AUDIT-031: add a focused oversized-body streaming test, then enforce `maxBodyBytes` while bytes arrive instead of after full buffering.
+- [ ] SWARM-AUDIT-032: add focused observability tests for thought/plan/tool/error metadata redaction, then make SwiftLog/OSLog output privacy-safe by default.
+- [ ] SWARM-AUDIT-038: inspect branch task/audit notes and web/security/observability code for any remaining concrete issue; if stale, document evidence and add proof where useful.
+- [ ] Run focused tests after each fix, then run a broader relevant test slice before pushing.
+- [ ] Commit one code-changing issue per commit, push `codex/audit-web-security-20260517`, and open a PR against `codex/fix-mcp-text-content-tests` if the cluster is complete.
+
+## Assumptions To Verify
+
+- Existing edits in `WebSearchSupport.swift` and `WebSearchSupportTests.swift` are user-owned or prior-agent work and should be preserved unless they conflict with the requested fixes.
+- The safe fetch implementation is the only web fetch path in scope for SWARM-AUDIT-030 and SWARM-AUDIT-031.
+- The observability leak is limited to tracers/log sinks rather than trace event in-memory data contracts; tests should distinguish redacted exported text from structured internal event data.
+- SWARM-AUDIT-038 may already be stale; evidence must come from current branch notes/code/tests, not from assumption.
+
+## Progress
+
+- [x] Planning complete.
+- [x] SWARM-AUDIT-030 complete.
+- [ ] SWARM-AUDIT-031 complete.
+- [ ] SWARM-AUDIT-032 complete.
+- [ ] SWARM-AUDIT-038 complete.
+- [ ] Final verification complete.
+- [ ] Pushed and PR created.
+
+## Review
+
+- SWARM-AUDIT-030: `swift test --filter WebSearchSupportTests` passes after adding DNS/redirect coverage and delegate-driven redirect/final response validation.

@@ -138,6 +138,38 @@ struct WebSearchSupportTests {
         }
     }
 
+    @Test("Safe web fetcher rejects private redirects before accepting body bytes")
+    func fetcherRejectsPrivateRedirectBeforeBodyRead() async throws {
+        RedirectWebFetchURLProtocol.reset()
+        defer { RedirectWebFetchURLProtocol.reset() }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("swarm-web-final-url-tests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+
+        let configuration = WebSearchTool.Configuration(
+            apiKey: nil,
+            persistFetchedArtifacts: false,
+            storeURL: root,
+            enabled: true
+        )
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [RedirectWebFetchURLProtocol.self]
+        let fetcher = SafeWebFetcher(configuration: configuration, sessionConfiguration: sessionConfiguration)
+        let publicURL = try #require(URL(string: "https://example.com/redirected"))
+
+        await #expect(throws: AgentError.self) {
+            _ = try await fetcher.fetch(
+                url: publicURL,
+                conditionalEtag: nil,
+                conditionalLastModified: nil
+            )
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(RedirectWebFetchURLProtocol.didLoadBody == false)
+    }
+
     @Test("Merged hits prefer close cached results")
     func mergeHitsPrefersUsefulCachedHits() {
         let cached = WebSearchHit(
@@ -226,5 +258,66 @@ struct WebSearchSupportTests {
         let matches = try await store.searchSections(query: "updated instructions", topK: 10)
         #expect(matches.count == 1)
         #expect(matches.first?.section.text.contains("Updated instructions") == true)
+    }
+}
+
+private final class RedirectWebFetchURLProtocol: URLProtocol {
+    private static let state = BodyLoadState()
+
+    static var didLoadBody: Bool {
+        state.didLoadBody
+    }
+
+    static func reset() {
+        state.reset()
+    }
+
+    override class func canInit(with _: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard request.url?.host != "127.0.0.1" else {
+            Self.state.markBodyLoaded()
+            client?.urlProtocol(self, didLoad: Data("private body".utf8))
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+
+        guard let redirectURL = URL(string: "http://127.0.0.1/private") else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        let redirectRequest = URLRequest(url: redirectURL)
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 302,
+            httpVersion: nil,
+            headerFields: ["Location": redirectURL.absoluteString]
+        )!
+        client?.urlProtocol(self, wasRedirectedTo: redirectRequest, redirectResponse: response)
+    }
+
+    override func stopLoading() {}
+}
+
+private final class BodyLoadState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bodyLoaded = false
+
+    var didLoadBody: Bool {
+        lock.withLock { bodyLoaded }
+    }
+
+    func markBodyLoaded() {
+        lock.withLock { bodyLoaded = true }
+    }
+
+    func reset() {
+        lock.withLock { bodyLoaded = false }
     }
 }
