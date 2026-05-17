@@ -942,7 +942,7 @@ public struct Agent: AgentRuntime, Sendable {
             // Session remains the transcript source of truth. When no session is supplied,
             // the default memory keeps user/assistant turns available for subsequent runs.
 
-            _ = resultBuilder.setMetadata(RuntimeMetadata.runtimeEngineKey, .string(RuntimeMetadata.graphRuntimeEngineName))
+            _ = resultBuilder.setMetadata(RuntimeMetadata.runtimeEngineKey, .string(RuntimeMetadata.nativeRuntimeEngineName))
             let result = resultBuilder.build()
             if configuration.autoPreviousResponseId, let session {
                 let response = makeResponse(from: result, responseID: responseID)
