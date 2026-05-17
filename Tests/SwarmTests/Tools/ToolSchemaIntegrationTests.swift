@@ -32,6 +32,21 @@ struct ToolSchemaIntegrationTests {
         #expect(schemas[0].parameters.first?.name == "text")
     }
 
+    @Test("ToolRegistry batch registration is atomic")
+    func registryBatchRegistrationIsAtomic() async throws {
+        let registry = ToolRegistry()
+        try await registry.register(MockTool(name: "existing"))
+
+        let newTool = MockTool(name: "new")
+        let duplicate = MockTool(name: "existing")
+
+        await #expect(throws: ToolRegistryError.self) {
+            try await registry.register([newTool, duplicate])
+        }
+        #expect(await registry.tool(named: "new") == nil)
+        #expect(await registry.tool(named: "existing") != nil)
+    }
+
     @Test("Agents accept typed Tool arrays")
     func agentsAcceptTypedTools() throws {
         let tool = SchemaEchoTool()
