@@ -220,6 +220,10 @@ public struct RetryPolicy: Sendable {
             do {
                 return try await operation()
             } catch {
+                if error is CancellationError || Task.isCancelled {
+                    throw error
+                }
+
                 lastError = error
 
                 // Check if we should retry
@@ -261,7 +265,11 @@ public struct RetryPolicy: Sendable {
             return 0
         }
 
-        return min(UInt64(nanoseconds), Self.maxBackoffNanoseconds)
+        if nanoseconds >= Double(Self.maxBackoffNanoseconds) {
+            return Self.maxBackoffNanoseconds
+        }
+
+        return UInt64(nanoseconds)
     }
 }
 
