@@ -898,6 +898,7 @@ extension ChatGraph {
                             input.emitStream(.customDebug(name: "toolInvocationFinished"), metadata.merging([
                                 "name": call.name,
                                 "success": "true",
+                                "output": transformed,
                             ]) { current, _ in current })
                             return (index, HiveChatMessage(
                                 id: "tool:" + call.id,
