@@ -136,6 +136,55 @@ public struct GuardrailExecutionResult: Sendable, Equatable {
     }
 }
 
+private final class GuardrailTimeoutRace<Result: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+    private var operationTask: Task<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
+
+    func setOperationTask(_ task: Task<Void, Never>) {
+        lock.lock()
+        let shouldCancel = completed
+        if !completed {
+            operationTask = task
+        }
+        lock.unlock()
+
+        if shouldCancel {
+            task.cancel()
+        }
+    }
+
+    func setTimeoutTask(_ task: Task<Void, Never>) {
+        lock.lock()
+        let shouldCancel = completed
+        if !completed {
+            timeoutTask = task
+        }
+        lock.unlock()
+
+        if shouldCancel {
+            task.cancel()
+        }
+    }
+
+    func complete(_ resume: () -> Void) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let operationTask = operationTask
+        let timeoutTask = timeoutTask
+        lock.unlock()
+
+        operationTask?.cancel()
+        timeoutTask?.cancel()
+        resume()
+    }
+}
+
 private struct GuardrailTimeoutError: Error, LocalizedError, Sendable {
     let guardrailName: String
     let timeout: Duration
@@ -229,20 +278,33 @@ public actor GuardrailRunner {
             return try await operation()
         }
 
-        return try await withThrowingTaskGroup(of: Result.self) { group in
-            group.addTask {
-                try await operation()
+        let race = GuardrailTimeoutRace<Result>()
+        return try await withCheckedThrowingContinuation { continuation in
+            let operationTask = Task {
+                do {
+                    let result = try await operation()
+                    race.complete {
+                        continuation.resume(returning: result)
+                    }
+                } catch {
+                    race.complete {
+                        continuation.resume(throwing: error)
+                    }
+                }
             }
-            group.addTask {
-                try await Task.sleep(for: timeout)
-                throw GuardrailTimeoutError(guardrailName: guardrailName, timeout: timeout)
-            }
+            race.setOperationTask(operationTask)
 
-            guard let result = try await group.next() else {
-                throw GuardrailTimeoutError(guardrailName: guardrailName, timeout: timeout)
+            let timeoutTask = Task {
+                do {
+                    try await Task.sleep(for: timeout)
+                } catch {
+                    return
+                }
+                race.complete {
+                    continuation.resume(throwing: GuardrailTimeoutError(guardrailName: guardrailName, timeout: timeout))
+                }
             }
-            group.cancelAll()
-            return result
+            race.setTimeoutTask(timeoutTask)
         }
     }
 

@@ -7,6 +7,11 @@
 import Foundation
 @testable import Swarm
 import Testing
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#endif
 
 // MARK: - MockGuardrailAgent
 
@@ -775,6 +780,24 @@ extension GuardrailIntegrationTests {
         await #expect(throws: GuardrailError.self) {
             _ = try await runner.runInputGuardrails([slow], input: "safe", context: nil)
         }
+    }
+
+    @Test("Input guardrail timeout returns before noncooperative operation finishes")
+    func inputGuardrailTimeoutReturnsBeforeNoncooperativeOperationFinishes() async throws {
+        let blocking = InputGuard("blocking_timeout") { _, _ in
+            usleep(1_000_000)
+            return .passed(message: "too late")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(timeout: .milliseconds(20))
+        )
+        let start = ContinuousClock.now
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runInputGuardrails([blocking], input: "safe", context: nil)
+        }
+
+        #expect(start.duration(to: ContinuousClock.now) < .milliseconds(500))
     }
 
     @Test("Parallel input guardrails honor configured timeout")
