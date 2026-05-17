@@ -107,7 +107,6 @@ public actor DefaultMembraneAgentAdapter: MembraneAgentAdapter {
     public init(configuration: MembraneFeatureConfiguration = .default) {
         self.configuration = configuration
 
-        jitLoader = JITToolLoader(jitMinToolCount: configuration.jitMinToolCount)
         let store = InMemoryPointerStore()
         pointerStore = store
         pointerResolver = PointerResolver(
@@ -136,15 +135,11 @@ public actor DefaultMembraneAgentAdapter: MembraneAgentAdapter {
 
         let manifests = sortedSchemas.map { ToolManifest(name: $0.name, description: $0.description) }
 
-        // For small-context providers (strict4k), force allowList even with few tools.
-        // Default JIT threshold is 12; for strict4k we drop to 4 to save prompt tokens.
+        // For small-context providers (strict4k), enter JIT with fewer tools to save prompt tokens.
         let effectiveMinTools = profile.preset == .strict4k ? min(4, configuration.jitMinToolCount) : configuration.jitMinToolCount
+        let jitLoader = JITToolLoader(jitMinToolCount: effectiveMinTools)
         var nextPlan: ToolPlan
-        if manifests.count >= effectiveMinTools {
-            nextPlan = jitLoader.plan(tools: manifests, existingPlan: toolPlan)
-        } else {
-            nextPlan = jitLoader.plan(tools: manifests, existingPlan: toolPlan)
-        }
+        nextPlan = jitLoader.plan(tools: manifests, existingPlan: toolPlan)
 
         switch nextPlan {
         case .allowAll:
@@ -321,7 +316,6 @@ public actor DefaultMembraneAgentAdapter: MembraneAgentAdapter {
     private var pointerIDs: [String] = []
     private var usageCounts: [String: Int] = [:]
 
-    private let jitLoader: JITToolLoader
     private let pointerStore: InMemoryPointerStore
     private let pointerResolver: PointerResolver
     private var toolPlan: ToolPlan

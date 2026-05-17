@@ -309,6 +309,36 @@ struct MembraneIntegrationTests {
         #expect(names.contains("gamma"))
     }
 
+    @Test("strict4k planning enters JIT at the lowered four-tool threshold")
+    func strict4kPlanningUsesLoweredJITThreshold() async throws {
+        let adapter = DefaultMembraneAgentAdapter(
+            configuration: MembraneFeatureConfiguration(jitMinToolCount: 12, defaultJITLoadCount: 2)
+        )
+        let toolSchemas = [
+            ToolSchema(name: "alpha", description: "alpha", parameters: []),
+            ToolSchema(name: "beta", description: "beta", parameters: []),
+            ToolSchema(name: "gamma", description: "gamma", parameters: []),
+            ToolSchema(name: "delta", description: "delta", parameters: []),
+        ]
+
+        let planned = try await adapter.plan(
+            prompt: "hello",
+            toolSchemas: toolSchemas,
+            profile: .strict4k
+        )
+
+        let names = Set(planned.toolSchemas.map(\.name))
+        #expect(planned.mode == "jit")
+        #expect(names.contains("alpha"))
+        #expect(names.contains("beta"))
+        #expect(names.contains("gamma") == false)
+        #expect(names.contains("delta") == false)
+        #expect(names.contains(MembraneInternalToolName.loadToolSchema))
+        #expect(names.contains(MembraneInternalToolName.addTools))
+        #expect(names.contains(MembraneInternalToolName.removeTools))
+        #expect(names.contains(MembraneInternalToolName.resolvePointer))
+    }
+
     @Test("Wax membrane pointer recall does not index private payload bytes")
     func waxMembranePointerRecallDoesNotIndexPrivatePayloadBytes() async throws {
         let storage = WaxMembraneStorage(url: temporaryWaxStoreURL())
