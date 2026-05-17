@@ -128,6 +128,62 @@ struct DocumentationFreshnessTests {
         }
     }
 
+    @Test("docs workflow builds pull requests without deploying Pages")
+    func docsWorkflowBuildsPullRequestsWithoutDeployingPages() throws {
+        let workflow = try readRepoFile(".github/workflows/docs.yml")
+
+        #expect(workflow.contains("pull_request:"))
+        #expect(workflow.contains("if: github.event_name != 'pull_request'"))
+        #expect(workflow.contains("npm run docs:build"))
+    }
+
+    @Test("release checklist includes docs and example pre-tag gates")
+    func releaseChecklistIncludesDocsAndExamplePreTagGates() throws {
+        let checklist = try readRepoFile("docs/release/release-checklist.md")
+
+        #expect(checklist.contains("npm ci"))
+        #expect(checklist.contains("npm run docs:build"))
+        #expect(checklist.contains("SWARM_CORE_ONLY=1 swift test --package-path Examples/CodeReviewer"))
+        #expect(checklist.contains("scripts/ci/verify-remote-release.sh"))
+    }
+
+    @Test("remote release verifier runs the standalone CodeReviewer example")
+    func remoteReleaseVerifierRunsCodeReviewerExample() throws {
+        let script = try readRepoFile("scripts/ci/verify-remote-release.sh")
+
+        #expect(script.contains("SWARM_CORE_ONLY=1"))
+        #expect(script.contains("swift test --package-path Examples/CodeReviewer"))
+        #expect(script.contains("EXAMPLE_LOG="))
+        #expect(script.contains("CodeReviewer test log"))
+    }
+
+    @Test("Linux workflow runs the shared core-lane verifier")
+    func linuxWorkflowRunsSharedCoreLaneVerifier() throws {
+        let workflow = try readRepoFile(".github/workflows/swift.yml")
+        let script = try readRepoFile("scripts/ci/verify-linux-core.sh")
+
+        #expect(workflow.contains("Build (Linux Core)"))
+        #expect(workflow.contains("scripts/ci/verify-linux-core.sh"))
+        #expect(workflow.contains("SWARM_CORE_ONLY=1 swift test"))
+        #expect(script.contains("SWARM_CORE_ONLY=1"))
+        #expect(script.contains("--disable-default-traits --target Swarm"))
+        #expect(script.contains("--disable-default-traits --target SwarmMCP"))
+    }
+
+    @Test("public Linux docs point at the core verifier instead of overclaiming provider parity")
+    func publicLinuxDocsPointAtCoreVerifier() throws {
+        let checkedFiles = [
+            "README.md",
+            "docs/guide/getting-started.md",
+        ]
+
+        for file in checkedFiles {
+            let text = try readRepoFile(file)
+            #expect(text.contains("scripts/ci/verify-linux-core.sh"), "\(file) should point at the Linux core verifier")
+            #expect(text.contains("Provider availability on Linux depends"), "\(file) should qualify provider support")
+        }
+    }
+
     private func readRepoFile(_ relativePath: String) throws -> String {
         try String(contentsOf: repoRoot.appendingPathComponent(relativePath), encoding: .utf8)
     }

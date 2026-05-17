@@ -62,16 +62,26 @@ final class TraceableMacroTests: XCTestCase {
                 ) async throws -> SendableValue {
                     let startTime = ContinuousClock.now
                     let traceId = UUID()
+                    let spanId = UUID()
+                    let argumentKeys = arguments.keys.sorted().map {
+                        SendableValue.string($0)
+                    }
 
                     // Emit start event
                     if let tracer = tracer {
-                        await tracer.record(TraceEvent(
-                            id: traceId,
-                            type: .toolCall,
-                            name: name,
-                            timestamp: Date(),
-                            duration: nil,
-                            metadata: ["arguments": .object(arguments)]
+                        await tracer.trace(TraceEvent(
+                            traceId: traceId,
+                            spanId: spanId,
+                            kind: .toolCall,
+                            level: .debug,
+                            message: "Tool call: \\(name)",
+                            metadata: [
+                                "tool_name": .string(name),
+                                "argument_count": .int(arguments.count),
+                                "argument_keys": .array(argumentKeys),
+                                "arguments_redacted": .bool(true)
+                            ],
+                            toolName: name
                         ))
                     }
 
@@ -81,16 +91,20 @@ final class TraceableMacroTests: XCTestCase {
 
                         // Emit success event
                         if let tracer = tracer {
-                            await tracer.record(TraceEvent(
-                                id: traceId,
-                                type: .toolResult,
-                                name: name,
-                                timestamp: Date(),
-                                duration: duration,
+                            await tracer.trace(TraceEvent(
+                                traceId: traceId,
+                                spanId: spanId,
+                                duration: duration.timeInterval,
+                                kind: .toolResult,
+                                level: .debug,
+                                message: "Tool result: \\(name)",
                                 metadata: [
-                                    "result": result,
+                                    "tool_name": .string(name),
+                                    "result_length": .int(String(describing: result).count),
+                                    "duration_ms": .double(duration.timeInterval * 1000),
                                     "success": .bool(true)
-                                ]
+                                ],
+                                toolName: name
                             ))
                         }
 
@@ -100,16 +114,20 @@ final class TraceableMacroTests: XCTestCase {
 
                         // Emit error event
                         if let tracer = tracer {
-                            await tracer.record(TraceEvent(
-                                id: traceId,
-                                type: .error,
-                                name: name,
-                                timestamp: Date(),
-                                duration: duration,
+                            await tracer.trace(TraceEvent(
+                                traceId: traceId,
+                                spanId: spanId,
+                                duration: duration.timeInterval,
+                                kind: .toolError,
+                                level: .error,
+                                message: "Tool error: \\(name)",
                                 metadata: [
-                                    "error": .string(error.localizedDescription),
+                                    "tool_name": .string(name),
+                                    "error_type": .string(String(describing: type(of: error))),
+                                    "duration_ms": .double(duration.timeInterval * 1000),
                                     "success": .bool(false)
-                                ]
+                                ],
+                                toolName: name
                             ))
                         }
 

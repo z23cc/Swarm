@@ -227,28 +227,3 @@ extension ToolRegistryAdapter {
         }
     }
 }
-
-extension SendableValue {
-    func toJSONObject() -> Any {
-        switch self {
-        case .null:
-            return NSNull()
-        case let .bool(value):
-            return value
-        case let .int(value):
-            return value
-        case let .double(value):
-            return value
-        case let .string(value):
-            return value
-        case let .array(values):
-            return values.map { $0.toJSONObject() }
-        case let .dictionary(values):
-            var result: [String: Any] = [:]
-            for (key, value) in values {
-                result[key] = value.toJSONObject()
-            }
-            return result
-        }
-    }
-}

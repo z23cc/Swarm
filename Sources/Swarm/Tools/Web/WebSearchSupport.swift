@@ -1265,6 +1265,15 @@ internal struct TavilySearchBackend: Sendable {
 
 internal struct SafeWebFetcher: Sendable {
     let configuration: WebSearchTool.Configuration
+    private let sessionConfiguration: URLSessionConfiguration
+
+    init(
+        configuration: WebSearchTool.Configuration,
+        sessionConfiguration: URLSessionConfiguration = .ephemeral
+    ) {
+        self.configuration = configuration
+        self.sessionConfiguration = sessionConfiguration
+    }
 
     func fetch(
         url: URL,
@@ -1285,15 +1294,17 @@ internal struct SafeWebFetcher: Sendable {
             request.setValue(conditionalLastModified, forHTTPHeaderField: "If-Modified-Since")
         }
 
-        let redirectDelegate = SafeWebFetchRedirectDelegate()
+        let fetchDelegate = SafeWebFetchDelegate(maxBodyBytes: configuration.maxBodyBytes)
         let session = URLSession(
-            configuration: .ephemeral,
-            delegate: redirectDelegate,
+            configuration: sessionConfiguration,
+            delegate: fetchDelegate,
             delegateQueue: nil
         )
         defer { session.finishTasksAndInvalidate() }
 
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        (data, response) = try await fetchDelegate.fetch(request, using: session)
         guard let http = response as? HTTPURLResponse else {
             throw AgentError.toolExecutionFailed(toolName: "websearch", underlyingError: "Fetch returned a non-HTTP response")
         }
@@ -1378,19 +1389,219 @@ internal struct SafeWebFetcher: Sendable {
     }
 }
 
-private final class SafeWebFetchRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+private final class SafeWebFetchDelegate: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+    private let maxBodyBytes: Int
+    private let state = SafeWebFetchDelegateState()
+
+    init(maxBodyBytes: Int) {
+        self.maxBodyBytes = maxBodyBytes
+    }
+
+    func fetch(_ request: URLRequest, using session: URLSession) async throws -> (Data, URLResponse) {
+        let task = SafeWebFetchTask(session.dataTask(with: request))
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                state.start(continuation)
+                task.resume()
+            }
+        } onCancel: {
+            task.cancel()
+            state.finish(throwing: CancellationError())
+        }
+    }
+
+    func urlSession(
+        _: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let url = response.url, SafeWebFetcher.isAllowedURL(url) else {
+            state.finish(
+                throwing: AgentError.invalidToolArguments(
+                    toolName: "websearch",
+                    reason: "Private-network hosts are blocked"
+                )
+            )
+            dataTask.cancel()
+            completionHandler(.cancel)
+            return
+        }
+        state.receive(response: response)
+        completionHandler(.allow)
+    }
+
+    func urlSession(
+        _: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive data: Data
+    ) {
+        do {
+            try state.receive(data: data, maxBodyBytes: maxBodyBytes)
+        } catch {
+            state.finish(throwing: error)
+            dataTask.cancel()
+        }
+    }
+
     func urlSession(
         _: URLSession,
         task _: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        if let error {
+            state.finish(throwing: error)
+        } else {
+            state.finish()
+        }
+    }
+
+    func urlSession(
+        _: URLSession,
+        task: URLSessionTask,
         willPerformHTTPRedirection _: HTTPURLResponse,
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
         guard let url = request.url, SafeWebFetcher.isAllowedURL(url) else {
+            state.finish(
+                throwing: AgentError.invalidToolArguments(
+                    toolName: "websearch",
+                    reason: "Private-network hosts are blocked"
+                )
+            )
+            task.cancel()
             completionHandler(nil)
             return
         }
         completionHandler(request)
+    }
+}
+
+private final class SafeWebFetchTask: @unchecked Sendable {
+    private let task: URLSessionDataTask
+
+    init(_ task: URLSessionDataTask) {
+        self.task = task
+    }
+
+    func resume() {
+        task.resume()
+    }
+
+    func cancel() {
+        task.cancel()
+    }
+}
+
+private final class SafeWebFetchDelegateState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+    private var response: URLResponse?
+    private var accumulator = SafeWebBodyAccumulator()
+    private var isFinished = false
+    private var finishedResult: Result<(Data, URLResponse), Error>?
+
+    func start(_ continuation: CheckedContinuation<(Data, URLResponse), Error>) {
+        let result: Result<(Data, URLResponse), Error>? = lock.withLock {
+            if isFinished {
+                return finishedResult ?? .failure(CancellationError())
+            }
+            self.continuation = continuation
+            return nil
+        }
+
+        if let result {
+            Self.resume(continuation, with: result)
+        }
+    }
+
+    func receive(response: URLResponse) {
+        lock.withLock {
+            self.response = response
+        }
+    }
+
+    func receive(data newData: Data, maxBodyBytes: Int) throws {
+        try lock.withLock {
+            try accumulator.append(newData, maxBodyBytes: maxBodyBytes)
+        }
+    }
+
+    func finish() {
+        let result: Result<(Data, URLResponse), Error> = lock.withLock {
+            guard isFinished == false else { return .failure(SafeWebFetchCompletion.alreadyFinished) }
+            isFinished = true
+            guard let response else {
+                let result: Result<(Data, URLResponse), Error> = .failure(
+                    AgentError.toolExecutionFailed(
+                        toolName: "websearch",
+                        underlyingError: "Fetch returned no response"
+                    )
+                )
+                finishedResult = result
+                return result
+            }
+            let result: Result<(Data, URLResponse), Error> = .success((accumulator.data, response))
+            finishedResult = result
+            return result
+        }
+        resume(with: result)
+    }
+
+    func finish(throwing error: Error) {
+        let result: Result<(Data, URLResponse), Error> = lock.withLock {
+            guard isFinished == false else { return .failure(SafeWebFetchCompletion.alreadyFinished) }
+            isFinished = true
+            let result: Result<(Data, URLResponse), Error> = .failure(error)
+            finishedResult = result
+            return result
+        }
+        resume(with: result)
+    }
+
+    private func resume(with result: Result<(Data, URLResponse), Error>) {
+        let continuation = lock.withLock {
+            let current = self.continuation
+            self.continuation = nil
+            return current
+        }
+        guard let continuation else { return }
+        Self.resume(continuation, with: result)
+    }
+
+    private static func resume(
+        _ continuation: CheckedContinuation<(Data, URLResponse), Error>,
+        with result: Result<(Data, URLResponse), Error>
+    ) {
+        switch result {
+        case let .success(value):
+            continuation.resume(returning: value)
+        case let .failure(error):
+            if (error as? SafeWebFetchCompletion) == .alreadyFinished {
+                return
+            }
+            continuation.resume(throwing: error)
+        }
+    }
+}
+
+private enum SafeWebFetchCompletion: Error {
+    case alreadyFinished
+}
+
+internal struct SafeWebBodyAccumulator: Sendable {
+    private(set) var data = Data()
+
+    mutating func append(_ newData: Data, maxBodyBytes: Int) throws {
+        let nextCount = data.count + newData.count
+        guard nextCount <= maxBodyBytes else {
+            throw AgentError.toolExecutionFailed(
+                toolName: "websearch",
+                underlyingError: "Fetched body exceeded limit of \(maxBodyBytes) bytes"
+            )
+        }
+        data.append(newData)
     }
 }
 

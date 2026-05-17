@@ -1,6 +1,8 @@
 import Foundation
+import MembraneCore
 @testable import Swarm
 import Testing
+import Wax
 
 @Suite("Membrane Integration")
 struct MembraneIntegrationTests {
@@ -307,6 +309,102 @@ struct MembraneIntegrationTests {
         #expect(names.contains("beta"))
         #expect(names.contains("gamma"))
     }
+
+    @Test("strict4k planning enters JIT at the lowered four-tool threshold")
+    func strict4kPlanningUsesLoweredJITThreshold() async throws {
+        let adapter = DefaultMembraneAgentAdapter(
+            configuration: MembraneFeatureConfiguration(jitMinToolCount: 12, defaultJITLoadCount: 2)
+        )
+        let toolSchemas = [
+            ToolSchema(name: "alpha", description: "alpha", parameters: []),
+            ToolSchema(name: "beta", description: "beta", parameters: []),
+            ToolSchema(name: "gamma", description: "gamma", parameters: []),
+            ToolSchema(name: "delta", description: "delta", parameters: []),
+        ]
+
+        let planned = try await adapter.plan(
+            prompt: "hello",
+            toolSchemas: toolSchemas,
+            profile: .strict4k
+        )
+
+        let names = Set(planned.toolSchemas.map(\.name))
+        #expect(planned.mode == "jit")
+        #expect(names.contains("alpha"))
+        #expect(names.contains("beta"))
+        #expect(names.contains("gamma") == false)
+        #expect(names.contains("delta") == false)
+        #expect(names.contains(MembraneInternalToolName.loadToolSchema))
+        #expect(names.contains(MembraneInternalToolName.addTools))
+        #expect(names.contains(MembraneInternalToolName.removeTools))
+        #expect(names.contains(MembraneInternalToolName.resolvePointer))
+    }
+
+    @Test("Wax membrane pointer recall does not index private payload bytes")
+    func waxMembranePointerRecallDoesNotIndexPrivatePayloadBytes() async throws {
+        let storage = WaxMembraneStorage(url: temporaryWaxStoreURL())
+        let secret = "SWARM-AUDIT-040-private-payload-\(UUID().uuidString)"
+        _ = try await storage.store(
+            payload: Data(secret.utf8),
+            dataType: .document,
+            summary: "Public pointer summary only"
+        )
+
+        let secretMatches = try await storage.recall(query: secret, limit: 5)
+        #expect(secretMatches.allSatisfy { !$0.content.contains(secret) })
+
+        let summaryMatches = try await storage.recall(query: "Public pointer summary", limit: 5)
+        #expect(summaryMatches.contains { $0.content.contains("Public pointer summary") })
+        #expect(summaryMatches.allSatisfy { !$0.content.contains(secret) })
+        #expect(summaryMatches.allSatisfy { !$0.content.contains("__payload_base64__") })
+        #expect(summaryMatches.allSatisfy { !$0.content.contains(Data(secret.utf8).base64EncodedString()) })
+    }
+
+    @Test("Wax membrane pointer delete removes persisted payload")
+    func waxMembranePointerDeleteRemovesPersistedPayload() async throws {
+        let url = temporaryWaxStoreURL()
+        let storage = WaxMembraneStorage(url: url)
+        let payload = Data("SWARM-AUDIT-041-persisted-delete".utf8)
+        let pointer = try await storage.store(
+            payload: payload,
+            dataType: .document,
+            summary: "Delete me"
+        )
+        #expect(try await storage.resolve(pointerID: pointer.id) == payload)
+
+        await storage.delete(pointerID: pointer.id)
+
+        await #expect(throws: MembraneError.self) {
+            _ = try await storage.resolve(pointerID: pointer.id)
+        }
+
+        let matches = try await storage.recall(query: "Delete me", limit: 5)
+        #expect(matches.allSatisfy { $0.provenance.metadata["membrane.pointer.id"] != pointer.id })
+    }
+
+    @Test("Wax membrane pointer store rolls back payload frame when indexing fails")
+    func waxMembranePointerStoreRollsBackPayloadFrameWhenIndexingFails() async throws {
+        let url = temporaryWaxStoreURL()
+        let failingIndex = FailingWaxPointerIndex()
+        let storage = WaxMembraneStorage(url: url) { _ in failingIndex }
+
+        await #expect(throws: FailingWaxPointerIndex.Failure.self) {
+            _ = try await storage.store(
+                payload: Data("SWARM-AUDIT-042-rollback-payload".utf8),
+                dataType: .document,
+                summary: "Must roll back"
+            )
+        }
+
+        let frameStore = try await Wax.FrameStore.open(at: url)
+        let activePayloadFrames = await frameStore.frames().filter {
+            $0.status == .active &&
+                $0.metadata["membrane.kind"] == "membrane.pointer.payloadFrame"
+        }
+        await frameStore.close()
+
+        #expect(activePayloadFrames.isEmpty)
+    }
 }
 
 private func defaultAdapterToolSchemas() -> [ToolSchema] {
@@ -371,6 +469,13 @@ private func makeTestTools(count: Int) -> [any AnyJSONTool] {
     }
 }
 
+private func temporaryWaxStoreURL() -> URL {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SwarmMembraneIntegrationTests", isDirectory: true)
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    return root.appendingPathComponent("\(UUID().uuidString).mv2s")
+}
+
 private struct MembraneTestTool: AnyJSONTool, Sendable {
     let name: String
     let description: String
@@ -401,6 +506,22 @@ private struct StructuredPayloadTool: AnyJSONTool, Sendable {
             "items": .array((0 ..< 20).map { .string("item-\($0)") })
         ])
     }
+}
+
+private actor FailingWaxPointerIndex: WaxPointerIndex {
+    struct Failure: Error {}
+
+    func save(_: String, metadata _: [String: String]) async throws {
+        throw Failure()
+    }
+
+    func flush() async throws {}
+
+    func search(_ query: String, options _: Wax.Memory.SearchOptions) async throws -> Wax.Memory.Results {
+        Wax.Memory.Results(query: query, items: [], totalTokens: 0)
+    }
+
+    func close() async throws {}
 }
 
 private actor PointerResolvingInferenceProvider: InferenceProvider, ConversationInferenceProvider {

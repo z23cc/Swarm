@@ -1,5 +1,5 @@
 # Swarm CI Workflow
-# Builds and tests on macOS and Linux
+# Builds and tests on macOS; verifies the Linux core build lane on Ubuntu
 
 name: Swift CI
 
@@ -59,12 +59,12 @@ jobs:
         run: swift run SwarmCapabilityShowcase matrix
 
       - name: Test CodeReviewer example
-        run: swift test
+        run: SWARM_CORE_ONLY=1 swift test
         working-directory: Examples/CodeReviewer
 
-  # Linux Build & Test (core features, no SwiftData)
+  # Linux core build lane
   build-linux:
-    name: Build & Test (Linux)
+    name: Build (Linux Core)
     runs-on: ubuntu-latest
 
     steps:
@@ -88,14 +88,8 @@ jobs:
           restore-keys: |
             linux-swift-
 
-      - name: Resolve dependencies
-        run: swift package resolve
-
-      - name: Build
-        run: swift build
-
-      - name: Run tests
-        run: SWARM_HIVE_RUNTIME=1 SWARM_INCLUDE_HIVE=1 swift test --no-parallel
+      - name: Run Linux core lane
+        run: scripts/ci/verify-linux-core.sh
 
   # Code Quality (macOS only - SwiftLint/SwiftFormat)
   code-quality:

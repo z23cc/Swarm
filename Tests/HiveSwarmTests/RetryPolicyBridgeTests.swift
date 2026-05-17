@@ -162,6 +162,52 @@ struct HiveAgentsRetryTests {
         }
     }
 
+    @Test("Huge finite retry delay growth clamps instead of trapping")
+    func modelNode_hugeFiniteRetryDelayGrowthClamps() async throws {
+        let script = RetryModelScript(failCount: 1, successChunks: [
+            .final(HiveChatResponse(message: retryAssistantMsg(id: "m1", content: "success")))
+        ])
+
+        let context = RuntimeContext(
+            modelName: "test-model",
+            toolApprovalPolicy: .never,
+            retryPolicy: .exponentialBackoff(
+                initialNanoseconds: UInt64.max,
+                factor: 2.0,
+                maxAttempts: 2,
+                maxNanoseconds: 0
+            )
+        )
+
+        let graph = try ChatGraph.makeToolUsingChatAgent()
+        let environment = HiveEnvironment<ChatGraph.Schema>(
+            context: context,
+            clock: RetryTestClock(),
+            logger: RetryTestLogger(),
+            model: AnyHiveModelClient(RetryScriptedModelClient(script: script)),
+            modelRouter: nil,
+            tools: AnyHiveToolRegistry(RetryStubToolRegistry(resultContent: "ok")),
+            checkpointStore: nil
+        )
+
+        let runtime = try HiveRuntime(graph: graph, environment: environment)
+        let handle = await runtime.run(
+            threadID: HiveThreadID("retry-overflow-test"),
+            input: "Hello",
+            options: HiveRunOptions(maxSteps: 5, checkpointPolicy: .disabled)
+        )
+        let outcome = try await handle.outcome.value
+
+        guard case .finished(let output, _) = outcome,
+              case .fullStore(let store) = output
+        else {
+            Issue.record("Expected finished fullStore outcome, got \(outcome)")
+            return
+        }
+
+        #expect(try store.get(ChatGraph.Schema.finalAnswerKey) == "success")
+    }
+
     @Test("No retry policy means immediate failure")
     func modelNode_noRetry_failsImmediately() async throws {
         let script = RetryModelScript(failCount: 1, successChunks: [

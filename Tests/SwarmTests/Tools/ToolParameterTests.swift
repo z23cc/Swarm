@@ -393,6 +393,20 @@ struct ToolProtocolExtensionTests {
         #expect(schema.parameters[0].name == "param1")
     }
 
+    @Test("Typed tool adapter preserves execution semantics")
+    func typedToolAdapterPreservesExecutionSemantics() {
+        let adapter = SemanticTypedTool().asAnyJSONTool()
+        let expected = ToolExecutionSemantics(
+            sideEffectLevel: .readOnly,
+            retryPolicy: .safe,
+            approvalRequirement: .never,
+            resultDurability: .artifactBacked
+        )
+
+        #expect(adapter.executionSemantics == expected)
+        #expect(adapter.schema.executionSemantics == expected)
+    }
+
     // MARK: - validateArguments
 
     @Test("validateArguments succeeds with all required parameters")
@@ -500,6 +514,28 @@ struct ToolProtocolExtensionTests {
         }
 
         #expect(caughtError)
+    }
+
+    @Test("validateArguments rejects deeply nested arrays")
+    func validateArgumentsRejectsDeeplyNestedArrays() {
+        var type = ToolParameter.ParameterType.string
+        var value = SendableValue.string("leaf")
+
+        for _ in 0 ..< 60 {
+            type = .array(elementType: type)
+            value = .array([value])
+        }
+
+        let tool = MockTool(
+            name: "deep_tool",
+            parameters: [
+                ToolParameter(name: "payload", description: "Nested payload", type: type)
+            ]
+        )
+
+        #expect(throws: AgentError.self) {
+            try tool.validateArguments(["payload": value])
+        }
     }
 
     // MARK: - requiredString
@@ -650,5 +686,26 @@ struct ToolProtocolExtensionTests {
         let value = tool.optionalString("units", from: arguments, default: "celsius")
 
         #expect(value == "fahrenheit")
+    }
+}
+
+private struct SemanticTypedTool: Tool {
+    struct Input: Codable, Sendable {}
+    struct Output: Codable, Sendable {
+        let ok: Bool
+    }
+
+    let name = "semantic_typed_tool"
+    let description = "Typed tool with explicit semantics"
+    let parameters: [ToolParameter] = []
+    let executionSemantics = ToolExecutionSemantics(
+        sideEffectLevel: .readOnly,
+        retryPolicy: .safe,
+        approvalRequirement: .never,
+        resultDurability: .artifactBacked
+    )
+
+    func execute(_: Input) async throws -> Output {
+        Output(ok: true)
     }
 }

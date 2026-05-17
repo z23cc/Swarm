@@ -337,7 +337,12 @@ struct GraphAgent: AgentRuntime, Sendable {
             let toolName = event.metadata["name"] ?? "tool"
             let call = toolCall(from: event, toolName: toolName)
             if event.metadata["success"] == "true" {
-                let result = ToolResult(callId: call.id, isSuccess: true, output: .null, duration: .zero)
+                let result = ToolResult(
+                    callId: call.id,
+                    isSuccess: true,
+                    output: event.metadata["output"].map(SendableValue.string) ?? .null,
+                    duration: .zero
+                )
                 return .tool(.completed(call: call, result: result))
             }
             let error = AgentError.toolExecutionFailed(toolName: toolName, underlyingError: "Tool invocation failed")
@@ -436,7 +441,7 @@ struct GraphAgent: AgentRuntime, Sendable {
 
             for message in messages where !message.toolCalls.isEmpty {
                 for hiveToolCall in message.toolCalls {
-                    let swarmID = UUID()
+                    let swarmID = Self.stableUUID(for: hiveToolCall.id)
                     hiveToSwarmID[hiveToolCall.id] = swarmID
                     let toolCall = ToolCall(
                         id: swarmID,

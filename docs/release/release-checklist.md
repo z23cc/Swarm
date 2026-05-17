@@ -8,10 +8,14 @@ Publish a `Swarm` GitHub tag that downstream users can resolve and build without
 
 1. Update release notes and changelog content.
 2. Verify `Package.swift` uses the intended published dependency graph for remote consumers.
-3. Run remote-only verification:
+3. Run local documentation and example verification:
+   - `npm ci`
+   - `npm run docs:build`
+   - `SWARM_CORE_ONLY=1 swift test --package-path Examples/CodeReviewer`
+4. Run remote-only verification:
    - `scripts/ci/verify-remote-release.sh`
-4. Confirm no compiler warnings or errors appear in the release build logs.
-5. Smoke-test consumption from a clean external package after tagging.
+5. Confirm no compiler warnings or errors appear in the release build logs.
+6. Smoke-test consumption from a clean external package after tagging.
 
 ## User-Owned Steps
 
@@ -24,6 +28,8 @@ Publish a `Swarm` GitHub tag that downstream users can resolve and build without
 - Working tree is intentional and reviewed.
 - `swift build` passes.
 - `swift test` passes.
+- `npm run docs:build` passes after a clean `npm ci`.
+- `SWARM_CORE_ONLY=1 swift test --package-path Examples/CodeReviewer` passes.
 - `scripts/ci/verify-remote-release.sh` passes.
 - README/examples still match the public package interface.
 - If `Swarm` depends on newer published internal tags, those upstream tags already exist.

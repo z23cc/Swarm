@@ -308,9 +308,9 @@ public actor ParallelToolExecutor {
     ) async throws -> [ToolExecutionResult] {
         guard !calls.isEmpty else { return [] }
 
-        // Validate all tools exist first
+        // Validate all tools exist and are enabled before any execution starts.
         for call in calls {
-            guard await registry.tool(named: call.toolName) != nil else {
+            guard let tool = await registry.tool(named: call.toolName), tool.isEnabled else {
                 throw AgentError.toolNotFound(name: call.toolName)
             }
         }
