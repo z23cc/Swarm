@@ -762,6 +762,36 @@ extension GuardrailIntegrationTests {
         #expect(events.count == 2)
     }
 
+    @Test("Input guardrails honor configured timeout")
+    func inputGuardrailsHonorConfiguredTimeout() async throws {
+        let slow = InputGuard("slow_timeout") { _, _ in
+            try await Task.sleep(for: .milliseconds(200))
+            return .passed(message: "too late")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(timeout: .milliseconds(10))
+        )
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runInputGuardrails([slow], input: "safe", context: nil)
+        }
+    }
+
+    @Test("Parallel input guardrails honor configured timeout")
+    func parallelInputGuardrailsHonorConfiguredTimeout() async throws {
+        let slow = InputGuard("parallel_slow_timeout") { _, _ in
+            try await Task.sleep(for: .milliseconds(200))
+            return .passed(message: "too late")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(runInParallel: true, timeout: .milliseconds(10))
+        )
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runInputGuardrails([slow], input: "safe", context: nil)
+        }
+    }
+
     @Test("Parallel input guardrail tripwire emits observer event")
     func parallelInputGuardrailTripwireEmitsObserverEvent() async throws {
         let observer = RecordingGuardrailObserver()

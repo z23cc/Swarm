@@ -13,6 +13,7 @@ import Foundation
 /// `GuardrailRunnerConfiguration` controls how the runner executes guardrails:
 /// - Sequential vs parallel execution
 /// - Stop-on-first-tripwire vs run-all behavior
+/// - Per-guardrail timeout enforcement
 ///
 /// Use the static factory properties for common configurations:
 /// ```swift
@@ -49,6 +50,12 @@ public struct GuardrailRunnerConfiguration: Sendable, Equatable {
     /// - `false`: Continue all guardrails, throw at end if any tripwired
     public let stopOnFirstTripwire: Bool
 
+    /// Maximum duration allowed for each guardrail validation.
+    ///
+    /// A `nil` value disables timeout enforcement. The default keeps guardrails
+    /// from stalling agent execution indefinitely.
+    public let timeout: Duration?
+
     // MARK: - Initialization
 
     /// Creates a guardrail runner configuration.
@@ -60,15 +67,21 @@ public struct GuardrailRunnerConfiguration: Sendable, Equatable {
     ///   - stopOnFirstTripwire: Whether to stop on first tripwire. Default: true
     ///     - `true`: Stop immediately when any guardrail triggers (faster, less information)
     ///     - `false`: Run all guardrails even after tripwires (slower, more diagnostic info)
+    ///   - timeout: Per-guardrail timeout. Default: 30 seconds. Pass `nil` to disable.
     ///
     /// ## Performance Notes
     ///
     /// - Parallel execution is faster but results may arrive out of order
     /// - Stop-on-first is recommended for production (fail-fast)
     /// - Run-all is useful for testing and diagnostics
-    public init(runInParallel: Bool = false, stopOnFirstTripwire: Bool = true) {
+    public init(
+        runInParallel: Bool = false,
+        stopOnFirstTripwire: Bool = true,
+        timeout: Duration? = .seconds(30)
+    ) {
         self.runInParallel = runInParallel
         self.stopOnFirstTripwire = stopOnFirstTripwire
+        self.timeout = timeout
     }
 }
 
@@ -120,6 +133,15 @@ public struct GuardrailExecutionResult: Sendable, Equatable {
     public init(guardrailName: String, result: GuardrailResult) {
         self.guardrailName = guardrailName
         self.result = result
+    }
+}
+
+private struct GuardrailTimeoutError: Error, LocalizedError, Sendable {
+    let guardrailName: String
+    let timeout: Duration
+
+    var errorDescription: String? {
+        "Guardrail '\(guardrailName)' timed out after \(timeout)."
     }
 }
 
@@ -197,6 +219,31 @@ public actor GuardrailRunner {
             guardrailType: guardrailType,
             result: result
         )
+    }
+
+    private func validateWithTimeout<Result: Sendable>(
+        guardrailName: String,
+        operation: @escaping @Sendable () async throws -> Result
+    ) async throws -> Result {
+        guard let timeout = configuration.timeout else {
+            return try await operation()
+        }
+
+        return try await withThrowingTaskGroup(of: Result.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw GuardrailTimeoutError(guardrailName: guardrailName, timeout: timeout)
+            }
+
+            guard let result = try await group.next() else {
+                throw GuardrailTimeoutError(guardrailName: guardrailName, timeout: timeout)
+            }
+            group.cancelAll()
+            return result
+        }
     }
 
     // MARK: - Input Guardrails
@@ -326,7 +373,9 @@ extension GuardrailRunner {
             try Task.checkCancellation()
 
             do {
-                let result = try await guardrail.validate(input, context: context)
+                let result = try await validateWithTimeout(guardrailName: guardrail.name) {
+                    try await guardrail.validate(input, context: context)
+                }
                 let executionResult = GuardrailExecutionResult(
                     guardrailName: guardrail.name,
                     result: result
@@ -384,7 +433,9 @@ extension GuardrailRunner {
             try Task.checkCancellation()
 
             do {
-                let result = try await guardrail.validate(output, agent: agent, context: context)
+                let result = try await validateWithTimeout(guardrailName: guardrail.name) {
+                    try await guardrail.validate(output, agent: agent, context: context)
+                }
                 let executionResult = GuardrailExecutionResult(
                     guardrailName: guardrail.name,
                     result: result
@@ -442,7 +493,9 @@ extension GuardrailRunner {
             try Task.checkCancellation()
 
             do {
-                let result = try await guardrail.validate(data)
+                let result = try await validateWithTimeout(guardrailName: guardrail.name) {
+                    try await guardrail.validate(data)
+                }
                 let executionResult = GuardrailExecutionResult(
                     guardrailName: guardrail.name,
                     result: result
@@ -501,7 +554,9 @@ extension GuardrailRunner {
             try Task.checkCancellation()
 
             do {
-                let result = try await guardrail.validate(data, output: output)
+                let result = try await validateWithTimeout(guardrailName: guardrail.name) {
+                    try await guardrail.validate(data, output: output)
+                }
                 let executionResult = GuardrailExecutionResult(
                     guardrailName: guardrail.name,
                     result: result
@@ -568,7 +623,9 @@ extension GuardrailRunner {
             for (index, guardrail) in guardrails.enumerated() {
                 group.addTask {
                     do {
-                        let result = try await guardrail.validate(input, context: context)
+                        let result = try await self.validateWithTimeout(guardrailName: guardrail.name) {
+                            try await guardrail.validate(input, context: context)
+                        }
                         return (index, GuardrailExecutionResult(
                             guardrailName: guardrail.name,
                             result: result
@@ -646,7 +703,9 @@ extension GuardrailRunner {
             for (index, guardrail) in guardrails.enumerated() {
                 group.addTask {
                     do {
-                        let result = try await guardrail.validate(output, agent: agent, context: context)
+                        let result = try await self.validateWithTimeout(guardrailName: guardrail.name) {
+                            try await guardrail.validate(output, agent: agent, context: context)
+                        }
                         return (index, GuardrailExecutionResult(
                             guardrailName: guardrail.name,
                             result: result
@@ -724,7 +783,9 @@ extension GuardrailRunner {
             for (index, guardrail) in guardrails.enumerated() {
                 group.addTask {
                     do {
-                        let result = try await guardrail.validate(data)
+                        let result = try await self.validateWithTimeout(guardrailName: guardrail.name) {
+                            try await guardrail.validate(data)
+                        }
                         return (index, GuardrailExecutionResult(
                             guardrailName: guardrail.name,
                             result: result
@@ -803,7 +864,9 @@ extension GuardrailRunner {
             for (index, guardrail) in guardrails.enumerated() {
                 group.addTask {
                     do {
-                        let result = try await guardrail.validate(data, output: output)
+                        let result = try await self.validateWithTimeout(guardrailName: guardrail.name) {
+                            try await guardrail.validate(data, output: output)
+                        }
                         return (index, GuardrailExecutionResult(
                             guardrailName: guardrail.name,
                             result: result
