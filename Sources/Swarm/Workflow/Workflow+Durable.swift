@@ -55,6 +55,7 @@ public extension Workflow {
 
 extension Workflow {
     func executeDurable(_ input: String, resumeFrom checkpointID: String?) async throws -> AgentResult {
+        #if SWARM_INTEGRATIONS
         guard let checkpoint = advancedConfiguration.checkpoint else {
             if checkpointID != nil {
                 throw WorkflowError.invalidWorkflow(
@@ -88,5 +89,15 @@ extension Workflow {
         return try await executeWithTimeout {
             try await engine.run(startInput: input)
         }
+        #else
+        if checkpointID != nil || advancedConfiguration.checkpoint != nil || advancedConfiguration.checkpointing != nil {
+            throw WorkflowError.invalidWorkflow(
+                reason: "Durable workflow execution requires the Integrations trait."
+            )
+        }
+        return try await executeWithTimeout {
+            try await executeDirect(input: input)
+        }
+        #endif
     }
 }

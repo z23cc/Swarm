@@ -371,6 +371,10 @@ public extension SendableValue {
         (try? fromJSONObject(value)) ?? .null
     }
 
+    package func toJSONObject() -> Any {
+        _convertToJSONObject()
+    }
+
     // MARK: Private
 
     /// Converts a JSON object to SendableValue.

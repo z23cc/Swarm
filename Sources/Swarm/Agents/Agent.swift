@@ -1141,6 +1141,7 @@ public struct Agent: AgentRuntime, Sendable {
     }
 
     static func makeDefaultMemory() throws -> any Memory {
+        #if SWARM_INTEGRATIONS
         if SwarmRuntimeEnvironment.isRunningTests {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("SwarmDefaultMemoryTests", isDirectory: true)
@@ -1151,10 +1152,14 @@ public struct Agent: AgentRuntime, Sendable {
             ))
         }
         return try DefaultAgentMemory()
+        #else
+        return SlidingWindowMemory()
+        #endif
     }
 
     private func resolvedToolRegistry() async throws -> ToolRegistry {
         let baseTools = await toolRegistry.allTools
+        #if SWARM_INTEGRATIONS
         guard !baseTools.contains(where: { $0.name == "websearch" }) else {
             return try ToolRegistry(tools: baseTools)
         }
@@ -1170,6 +1175,9 @@ public struct Agent: AgentRuntime, Sendable {
         var tools = baseTools
         tools.append(WebSearchTool(configuration: ambientWeb))
         return try ToolRegistry(tools: tools)
+        #else
+        return try ToolRegistry(tools: baseTools)
+        #endif
     }
 
     private func resolvedInferenceOptions(
@@ -1361,11 +1369,13 @@ public struct Agent: AgentRuntime, Sendable {
                         query = input
                     }
                     var windowedContext = ""
+                    #if SWARM_INTEGRATIONS
                     if let defaultMem = activeMemory as? DefaultAgentMemory {
                         windowedContext = await defaultMem.context(for: query, tokenLimit: historyBudget)
                     } else if let ccMemory = activeMemory as? ContextCoreMemory {
                         windowedContext = await ccMemory.context(for: query, tokenLimit: historyBudget)
                     }
+                    #endif
                     if !windowedContext.isEmpty {
                         let livePrompt = buildPrompt(from: conversationHistory)
                         rawPrompt = """

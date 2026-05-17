@@ -10,10 +10,12 @@ import Foundation
 
 enum DefaultInferenceProviderFactory {
     static func makeFoundationModelsProviderIfAvailable() -> (any InferenceProvider)? {
+        #if SWARM_INTEGRATIONS
         #if canImport(FoundationModels)
         if #available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *) {
             return ConduitProviderSelection.foundationModelsIfAvailable()?.makeProvider()
         }
+        #endif
         #endif
         return nil
     }

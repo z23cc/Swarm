@@ -273,20 +273,34 @@ public struct WebSearchTool: AnyJSONTool, Sendable {
     }
 
     public func execute(arguments: [String: SendableValue]) async throws -> SendableValue {
+        #if SWARM_INTEGRATIONS
         let request = try parseRequest(arguments: arguments)
         let envelope = try await WebToolRuntime.shared.execute(
             request: request,
             configuration: resolvedConfiguration
         )
         return .string(formatLegacy(envelope))
+        #else
+        throw AgentError.toolExecutionFailed(
+            toolName: name,
+            underlyingError: "Web search requires the Integrations trait."
+        )
+        #endif
     }
 
     public func execute() async throws -> String {
+        #if SWARM_INTEGRATIONS
         let envelope = try await WebToolRuntime.shared.execute(
             request: legacyRequest(),
             configuration: resolvedConfiguration
         )
         return formatLegacy(envelope)
+        #else
+        throw AgentError.toolExecutionFailed(
+            toolName: name,
+            underlyingError: "Web search requires the Integrations trait."
+        )
+        #endif
     }
 
     private var resolvedConfiguration: Configuration {
@@ -296,6 +310,7 @@ public struct WebSearchTool: AnyJSONTool, Sendable {
         return Configuration(apiKey: legacyAPIKey)
     }
 
+    #if SWARM_INTEGRATIONS
     private func parseRequest(arguments: [String: SendableValue]) throws -> WebToolRequest {
         let rawMode = arguments["mode"]?.stringValue ?? mode
         let parsedMode = Mode(rawValue: rawMode.lowercased()) ?? .search
@@ -369,6 +384,7 @@ public struct WebSearchTool: AnyJSONTool, Sendable {
 
         return lines.joined(separator: "\n")
     }
+    #endif
 }
 
 private func nonEmpty(_ value: String) -> String? {
