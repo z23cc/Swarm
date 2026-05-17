@@ -111,6 +111,7 @@ actor WaxMembraneStorage: PointerStore, ContextRecallStore {
 
     func delete(pointerID: String) async {
         cachedPayloads[pointerID] = nil
+        try? await deletePersistedFrames(pointerID: pointerID)
     }
 
     func recall(query: String, limit: Int) async throws -> [ContextRecallCandidate] {
@@ -193,6 +194,19 @@ actor WaxMembraneStorage: PointerStore, ContextRecallStore {
         let payload = try await frameStore.content(frameID: frame.id)
         await frameStore.close()
         return payload
+    }
+
+    private func deletePersistedFrames(pointerID: String) async throws {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return
+        }
+        try await closeMemoryIfOpen()
+        let frameStore = try await Wax.FrameStore.open(at: url)
+        let frames = await frameStore.frames()
+        for frame in frames where frame.status == .active && frame.metadata[MetadataKey.pointerID] == pointerID {
+            try await frameStore.delete(frameID: frame.id)
+        }
+        await frameStore.close()
     }
 
     private static func pointerID(for payload: Data) -> String {

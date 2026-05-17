@@ -328,6 +328,28 @@ struct MembraneIntegrationTests {
         #expect(summaryMatches.allSatisfy { !$0.content.contains("__payload_base64__") })
         #expect(summaryMatches.allSatisfy { !$0.content.contains(Data(secret.utf8).base64EncodedString()) })
     }
+
+    @Test("Wax membrane pointer delete removes persisted payload")
+    func waxMembranePointerDeleteRemovesPersistedPayload() async throws {
+        let url = temporaryWaxStoreURL()
+        let storage = WaxMembraneStorage(url: url)
+        let payload = Data("SWARM-AUDIT-041-persisted-delete".utf8)
+        let pointer = try await storage.store(
+            payload: payload,
+            dataType: .document,
+            summary: "Delete me"
+        )
+        #expect(try await storage.resolve(pointerID: pointer.id) == payload)
+
+        await storage.delete(pointerID: pointer.id)
+
+        await #expect(throws: MembraneError.self) {
+            _ = try await storage.resolve(pointerID: pointer.id)
+        }
+
+        let matches = try await storage.recall(query: "Delete me", limit: 5)
+        #expect(matches.allSatisfy { $0.provenance.metadata["membrane.pointer.id"] != pointer.id })
+    }
 }
 
 private func defaultAdapterToolSchemas() -> [ToolSchema] {
