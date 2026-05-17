@@ -720,6 +720,48 @@ extension GuardrailIntegrationTests {
         #expect(latestStart < earliestEnd, "Expected parallel guardrail execution; intervals did not overlap.")
     }
 
+    @Test("Parallel run-all input guardrails return results in input order")
+    func parallelRunAllInputGuardrailsReturnResultsInInputOrder() async throws {
+        let slow = InputGuard("slow_first") { _, _ in
+            try? await Task.sleep(for: .milliseconds(40))
+            return .passed(message: "slow passed")
+        }
+        let fast = InputGuard("fast_second") { _, _ in
+            .passed(message: "fast passed")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(runInParallel: true, stopOnFirstTripwire: false)
+        )
+
+        let results = try await runner.runInputGuardrails([slow, fast], input: "safe", context: nil)
+
+        #expect(results.map(\.guardrailName) == ["slow_first", "fast_second"])
+    }
+
+    @Test("Parallel run-all input guardrails emit all tripwire observer events")
+    func parallelRunAllInputGuardrailsEmitAllTripwireObserverEvents() async throws {
+        let observer = RecordingGuardrailObserver()
+        let slow = InputGuard("slow_blocker") { _, _ in
+            try? await Task.sleep(for: .milliseconds(40))
+            return .tripwire(message: "slow blocked")
+        }
+        let fast = InputGuard("fast_blocker") { _, _ in
+            .tripwire(message: "fast blocked")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(runInParallel: true, stopOnFirstTripwire: false),
+            observer: observer
+        )
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runInputGuardrails([slow, fast], input: "blocked", context: nil)
+        }
+
+        let events = await observer.events
+        #expect(Set(events.map(\.name)) == ["slow_blocker", "fast_blocker"])
+        #expect(events.count == 2)
+    }
+
     @Test("Parallel input guardrail tripwire emits observer event")
     func parallelInputGuardrailTripwireEmitsObserverEvent() async throws {
         let observer = RecordingGuardrailObserver()
