@@ -87,7 +87,7 @@
             let message = formatLogMessage(event)
 
             // Emit the log message
-            logger.log(level: logType, "\(message, privacy: .public)")
+            logger.log(level: logType, "\(message, privacy: .private)")
 
             // Handle signpost intervals if enabled
             if emitSignposts {
@@ -162,7 +162,7 @@
             }
 
             // Add message
-            parts.append(event.message)
+            parts.append(TraceEventPublicLogSanitizer.message(for: event))
 
             // Add duration if present
             if let duration = event.duration {
@@ -172,7 +172,7 @@
 
             // Add error information if present
             if let error = event.error {
-                parts.append("error=\(error.type): \(error.message)")
+                parts.append("error=\(TraceEventPublicLogSanitizer.errorSummary(for: error))")
             }
 
             // Add trace/span IDs for debugging
@@ -223,7 +223,7 @@
             let state = signposter.beginInterval(name, id: signpostID(for: event.spanId))
             activeIntervals[event.spanId] = state
 
-            signposter.emitEvent("Start", id: signpostID(for: event.spanId), "\(description, privacy: .public)")
+            signposter.emitEvent("Start", id: signpostID(for: event.spanId), "\(description, privacy: .private)")
         }
 
         /// Ends a signpost interval for the given event.
@@ -241,11 +241,11 @@
                  .agentComplete,
                  .agentError:
                 name = "LegacyAgent Execution"
-                description = event.message
+                description = TraceEventPublicLogSanitizer.message(for: event)
             case .toolError,
                  .toolResult:
                 name = "Tool Execution"
-                description = event.message
+                description = TraceEventPublicLogSanitizer.message(for: event)
             default:
                 return
             }
@@ -254,7 +254,7 @@
 
             // Emit completion event
             let status = event.kind.rawValue
-            signposter.emitEvent("End", id: signpostID(for: event.spanId), "\(status): \(description, privacy: .public)")
+            signposter.emitEvent("End", id: signpostID(for: event.spanId), "\(status): \(description, privacy: .private)")
         }
 
         /// Creates a signpost ID from a UUID.

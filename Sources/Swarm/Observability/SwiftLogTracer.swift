@@ -94,7 +94,7 @@ public actor SwiftLogTracer: Tracer {
             parts.append("tool=\(toolName)")
         }
 
-        parts.append(event.message)
+        parts.append(TraceEventPublicLogSanitizer.message(for: event))
 
         if let duration = event.duration {
             parts.append("(\(String(format: "%.2f", duration * 1000))ms)")
