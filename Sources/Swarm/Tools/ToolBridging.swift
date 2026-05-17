@@ -18,6 +18,7 @@ public struct AnyJSONToolAdapter<T: Tool>: AnyJSONTool, Sendable {
     public var parameters: [ToolParameter] { tool.parameters }
     public var inputGuardrails: [any ToolInputGuardrail] { tool.inputGuardrails }
     public var outputGuardrails: [any ToolOutputGuardrail] { tool.outputGuardrails }
+    public var executionSemantics: ToolExecutionSemantics { tool.executionSemantics }
 
     public init(_ tool: T) {
         self.tool = tool
@@ -55,4 +56,3 @@ public extension Tool {
         AnyJSONToolAdapter(self)
     }
 }
-
