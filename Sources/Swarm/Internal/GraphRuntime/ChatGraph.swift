@@ -552,6 +552,7 @@ extension ChatGraph {
                     id: message.id,
                     role: message.role,
                     content: message.content,
+                    reasoningContent: message.reasoningContent,
                     name: message.name,
                     toolCallID: message.toolCallID,
                     toolCalls: message.toolCalls,
@@ -755,6 +756,7 @@ extension ChatGraph {
                 id: assistantMessageID,
                 role: assistantMessage.role,
                 content: assistantMessage.content,
+                reasoningContent: assistantMessage.reasoningContent,
                 name: assistantMessage.name,
                 toolCallID: assistantMessage.toolCallID,
                 toolCalls: assistantMessage.toolCalls,
@@ -898,6 +900,7 @@ extension ChatGraph {
                             input.emitStream(.customDebug(name: "toolInvocationFinished"), metadata.merging([
                                 "name": call.name,
                                 "success": "true",
+                                "output": transformed,
                             ]) { current, _ in current })
                             return (index, HiveChatMessage(
                                 id: "tool:" + call.id,
@@ -964,7 +967,7 @@ extension ChatGraph {
                         if sleepNs > 0 {
                             try await clock.sleep(nanoseconds: sleepNs)
                         }
-                        delay = UInt64(Double(delay) * factor)
+                        delay = saturatedRetryDelay(delay, factor: factor, maxNanoseconds: maxNs)
                     }
                 }
             }
@@ -974,6 +977,21 @@ extension ChatGraph {
                 throw HiveRuntimeError.invalidRunOptions("Retry policy exhausted with no error recorded")
             }
         }
+    }
+
+    private static func saturatedRetryDelay(_ delay: UInt64, factor: Double, maxNanoseconds: UInt64) -> UInt64 {
+        guard delay > 0, factor.isFinite, factor > 0 else {
+            return 0
+        }
+
+        let grown = Double(delay) * factor
+        guard grown.isFinite, grown > 0 else {
+            return maxNanoseconds
+        }
+        if grown >= Double(UInt64.max) {
+            return maxNanoseconds
+        }
+        return min(UInt64(grown), maxNanoseconds)
     }
 
     private static func compactMessages(

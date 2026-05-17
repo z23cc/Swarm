@@ -88,6 +88,7 @@ struct HiveBackedAgentStreamingTests {
         #expect(start.id == endCall.id)
         #expect(endResult.callId == endCall.id)
         #expect(endCall.providerCallId == "c1")
+        #expect(endResult.output == .string("42"))
     }
 
     @Test("stream yields iterationStarted and iterationCompleted")
