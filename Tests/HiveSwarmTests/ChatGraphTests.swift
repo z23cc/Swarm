@@ -34,6 +34,24 @@ struct HiveAgentsTests {
         })
     }
 
+    @Test("Messages reducer preserves reasoning content")
+    func messagesReducer_preservesReasoningContent() throws {
+        let update = [
+            HiveChatMessage(
+                id: "reasoning-message",
+                role: .assistant,
+                content: "Final answer",
+                reasoningContent: "Private chain summary"
+            )
+        ]
+
+        let reduced = try ChatGraph.MessagesReducer.reduce(current: [], update: update)
+
+        #expect(reduced.count == 1)
+        #expect(reduced[0].content == "Final answer")
+        #expect(reduced[0].reasoningContent == "Private chain summary")
+    }
+
     @Test("Compaction: llmInputMessages derived, messages preserved (runtime-driven)")
     func compaction_llmInputDerived_messagesPreserved() async throws {
         let graph = try ChatGraph.makeToolUsingChatAgent()
