@@ -2,6 +2,7 @@ import Foundation
 import MembraneCore
 @testable import Swarm
 import Testing
+import Wax
 
 @Suite("Membrane Integration")
 struct MembraneIntegrationTests {
@@ -380,6 +381,30 @@ struct MembraneIntegrationTests {
         let matches = try await storage.recall(query: "Delete me", limit: 5)
         #expect(matches.allSatisfy { $0.provenance.metadata["membrane.pointer.id"] != pointer.id })
     }
+
+    @Test("Wax membrane pointer store rolls back payload frame when indexing fails")
+    func waxMembranePointerStoreRollsBackPayloadFrameWhenIndexingFails() async throws {
+        let url = temporaryWaxStoreURL()
+        let failingIndex = FailingWaxPointerIndex()
+        let storage = WaxMembraneStorage(url: url) { _ in failingIndex }
+
+        await #expect(throws: FailingWaxPointerIndex.Failure.self) {
+            _ = try await storage.store(
+                payload: Data("SWARM-AUDIT-042-rollback-payload".utf8),
+                dataType: .document,
+                summary: "Must roll back"
+            )
+        }
+
+        let frameStore = try await Wax.FrameStore.open(at: url)
+        let activePayloadFrames = await frameStore.frames().filter {
+            $0.status == .active &&
+                $0.metadata["membrane.kind"] == "membrane.pointer.payloadFrame"
+        }
+        await frameStore.close()
+
+        #expect(activePayloadFrames.isEmpty)
+    }
 }
 
 private func defaultAdapterToolSchemas() -> [ToolSchema] {
@@ -481,6 +506,22 @@ private struct StructuredPayloadTool: AnyJSONTool, Sendable {
             "items": .array((0 ..< 20).map { .string("item-\($0)") })
         ])
     }
+}
+
+private actor FailingWaxPointerIndex: WaxPointerIndex {
+    struct Failure: Error {}
+
+    func save(_: String, metadata _: [String: String]) async throws {
+        throw Failure()
+    }
+
+    func flush() async throws {}
+
+    func search(_ query: String, options _: Wax.Memory.SearchOptions) async throws -> Wax.Memory.Results {
+        Wax.Memory.Results(query: query, items: [], totalTokens: 0)
+    }
+
+    func close() async throws {}
 }
 
 private actor PointerResolvingInferenceProvider: InferenceProvider, ConversationInferenceProvider {

@@ -3,6 +3,15 @@ import Foundation
 import MembraneCore
 import Wax
 
+protocol WaxPointerIndex: Sendable {
+    func save(_ text: String, metadata: [String: String]) async throws
+    func flush() async throws
+    func search(_ query: String, options: Wax.Memory.SearchOptions) async throws -> Wax.Memory.Results
+    func close() async throws
+}
+
+extension Wax.Memory: WaxPointerIndex {}
+
 actor WaxMembraneStorage: PointerStore, ContextRecallStore {
     private enum MetadataKey {
         static let kind = "membrane.kind"
@@ -37,11 +46,16 @@ actor WaxMembraneStorage: PointerStore, ContextRecallStore {
     }
 
     private let url: URL
-    private var memory: Wax.Memory?
+    private let memoryFactory: @Sendable (URL) async throws -> any WaxPointerIndex
+    private var memory: (any WaxPointerIndex)?
     private var cachedPayloads: [String: Data] = [:]
 
-    init(url: URL = defaultStoreURL) {
+    init(
+        url: URL = defaultStoreURL,
+        memoryFactory: @escaping @Sendable (URL) async throws -> any WaxPointerIndex = { try await Wax.Memory(at: $0) }
+    ) {
         self.url = url
+        self.memoryFactory = memoryFactory
     }
 
     func store(payload: Data, dataType: MemoryPointer.DataType, summary: String) async throws -> MemoryPointer {
@@ -59,19 +73,24 @@ actor WaxMembraneStorage: PointerStore, ContextRecallStore {
         )
 
         let memory = try await ensureMemory()
-        try await memory.save(
-            storedDocument,
-            metadata: [
-                MetadataKey.kind: MetadataKey.pointerPayloadKind,
-                MetadataKey.pointerID: pointerID,
-                MetadataKey.pointerSHA256: sha256,
-                MetadataKey.pointerDataType: dataType.rawValue,
-                MetadataKey.payloadEncoding: "frame",
-                MetadataKey.payloadFrameID: String(payloadFrameID),
-                MetadataKey.summary: summary,
-            ]
-        )
-        try await memory.flush()
+        do {
+            try await memory.save(
+                storedDocument,
+                metadata: [
+                    MetadataKey.kind: MetadataKey.pointerPayloadKind,
+                    MetadataKey.pointerID: pointerID,
+                    MetadataKey.pointerSHA256: sha256,
+                    MetadataKey.pointerDataType: dataType.rawValue,
+                    MetadataKey.payloadEncoding: "frame",
+                    MetadataKey.payloadFrameID: String(payloadFrameID),
+                    MetadataKey.summary: summary,
+                ]
+            )
+            try await memory.flush()
+        } catch {
+            try? await deletePersistedFrame(frameID: payloadFrameID)
+            throw error
+        }
 
         cachedPayloads[pointerID] = payload
         return MemoryPointer(
@@ -134,11 +153,11 @@ actor WaxMembraneStorage: PointerStore, ContextRecallStore {
         }
     }
 
-    private func ensureMemory() async throws -> Wax.Memory {
+    private func ensureMemory() async throws -> any WaxPointerIndex {
         if let memory {
             return memory
         }
-        let resolved = try await Wax.Memory(at: url)
+        let resolved = try await memoryFactory(url)
         memory = resolved
         return resolved
     }
@@ -156,6 +175,20 @@ actor WaxMembraneStorage: PointerStore, ContextRecallStore {
         return try await Wax.FrameStore.create(at: url)
     }
 
+    private func withFrameStore<Result>(
+        _ body: (Wax.FrameStore) async throws -> Result
+    ) async throws -> Result {
+        let frameStore = try await openFrameStore()
+        do {
+            let result = try await body(frameStore)
+            await frameStore.close()
+            return result
+        } catch {
+            await frameStore.close()
+            throw error
+        }
+    }
+
     private func persistPayloadFrame(
         _ payload: Data,
         pointerID: String,
@@ -163,37 +196,44 @@ actor WaxMembraneStorage: PointerStore, ContextRecallStore {
         dataType: MemoryPointer.DataType
     ) async throws -> UInt64 {
         try await closeMemoryIfOpen()
-        let frameStore = try await openFrameStore()
-        let frameID = try await frameStore.put(
-            payload,
-            kind: MetadataKey.pointerPayloadFrameKind,
-            metadata: [
-                MetadataKey.kind: MetadataKey.pointerPayloadFrameKind,
-                MetadataKey.pointerID: pointerID,
-                MetadataKey.pointerSHA256: sha256,
-                MetadataKey.pointerDataType: dataType.rawValue,
-                MetadataKey.payloadEncoding: "raw",
-            ]
-        )
-        await frameStore.close()
-        return frameID
+        return try await withFrameStore { frameStore in
+            try await frameStore.put(
+                payload,
+                kind: MetadataKey.pointerPayloadFrameKind,
+                metadata: [
+                    MetadataKey.kind: MetadataKey.pointerPayloadFrameKind,
+                    MetadataKey.pointerID: pointerID,
+                    MetadataKey.pointerSHA256: sha256,
+                    MetadataKey.pointerDataType: dataType.rawValue,
+                    MetadataKey.payloadEncoding: "raw",
+                ]
+            )
+        }
     }
 
     private func persistedPayloadFrame(pointerID: String) async throws -> Data? {
         try await closeMemoryIfOpen()
-        let frameStore = try await openFrameStore()
-        let frames = await frameStore.frames()
-        guard let frame = frames.reversed().first(where: {
-            $0.status == .active &&
-                $0.metadata[MetadataKey.pointerID] == pointerID &&
-                $0.metadata[MetadataKey.kind] == MetadataKey.pointerPayloadFrameKind
-        }) else {
-            await frameStore.close()
-            return nil
+        return try await withFrameStore { frameStore in
+            let frames = await frameStore.frames()
+            guard let frame = frames.reversed().first(where: {
+                $0.status == .active &&
+                    $0.metadata[MetadataKey.pointerID] == pointerID &&
+                    $0.metadata[MetadataKey.kind] == MetadataKey.pointerPayloadFrameKind
+            }) else {
+                return nil
+            }
+            return try await frameStore.content(frameID: frame.id)
         }
-        let payload = try await frameStore.content(frameID: frame.id)
-        await frameStore.close()
-        return payload
+    }
+
+    private func deletePersistedFrame(frameID: UInt64) async throws {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return
+        }
+        try await closeMemoryIfOpen()
+        try await withFrameStore { frameStore in
+            try await frameStore.delete(frameID: frameID)
+        }
     }
 
     private func deletePersistedFrames(pointerID: String) async throws {
@@ -201,12 +241,12 @@ actor WaxMembraneStorage: PointerStore, ContextRecallStore {
             return
         }
         try await closeMemoryIfOpen()
-        let frameStore = try await Wax.FrameStore.open(at: url)
-        let frames = await frameStore.frames()
-        for frame in frames where frame.status == .active && frame.metadata[MetadataKey.pointerID] == pointerID {
-            try await frameStore.delete(frameID: frame.id)
+        try await withFrameStore { frameStore in
+            let frames = await frameStore.frames()
+            for frame in frames where frame.status == .active && frame.metadata[MetadataKey.pointerID] == pointerID {
+                try await frameStore.delete(frameID: frame.id)
+            }
         }
-        await frameStore.close()
     }
 
     private static func pointerID(for payload: Data) -> String {
