@@ -334,6 +334,94 @@ struct AgentWorkspaceTests {
         #expect(Set(agent.tools.map(\.name)) == ["refund_lookup", "ticket_create"])
     }
 
+    @Test("Workspace validation rejects agent spec id mismatch")
+    func workspaceValidationRejectsAgentSpecIDMismatch() async throws {
+        let workspaceRoot = try makeWorkspaceRoot()
+        defer { try? FileManager.default.removeItem(at: workspaceRoot) }
+        try writeFile(
+            at: workspaceRoot.appendingPathComponent(".swarm/agents/support.md"),
+            contents: """
+            ---
+            schema_version: 1
+            id: billing
+            title: Billing
+            skills: []
+            revision: 1
+            updated_at: 2026-05-17T00:00:00Z
+            ---
+            You are the billing agent.
+            """
+        )
+
+        let workspace = try AgentWorkspace(
+            bundleRoot: workspaceRoot,
+            writableRoot: workspaceRoot.appendingPathComponent("Writable", isDirectory: true),
+            indexCacheRoot: workspaceRoot.appendingPathComponent("Cache", isDirectory: true)
+        )
+
+        let report = try await workspace.validate()
+        #expect(report.isValid == false)
+        #expect(report.issues.contains {
+            $0.path == ".swarm/agents/support.md" && $0.message.contains("id")
+        })
+    }
+
+    @Test("Workspace rejects path traversal agent spec identifiers")
+    func workspaceRejectsPathTraversalAgentSpecIdentifiers() throws {
+        let workspaceRoot = try makeWorkspaceRoot()
+        defer { try? FileManager.default.removeItem(at: workspaceRoot) }
+        try writeFile(
+            at: workspaceRoot.appendingPathComponent(".swarm/outside.md"),
+            contents: """
+            ---
+            schema_version: 1
+            id: outside
+            title: Outside
+            skills: []
+            revision: 1
+            updated_at: 2026-05-17T00:00:00Z
+            ---
+            This spec must not be loadable through path traversal.
+            """
+        )
+
+        let workspace = try AgentWorkspace(
+            bundleRoot: workspaceRoot,
+            writableRoot: workspaceRoot.appendingPathComponent("Writable", isDirectory: true),
+            indexCacheRoot: workspaceRoot.appendingPathComponent("Cache", isDirectory: true)
+        )
+
+        #expect(throws: AgentWorkspaceError.self) {
+            _ = try workspace.loadAgentSpec(id: "../outside")
+        }
+    }
+
+    @Test("Workspace rejects path traversal skill names")
+    func workspaceRejectsPathTraversalSkillNames() throws {
+        let workspaceRoot = try makeWorkspaceRoot()
+        defer { try? FileManager.default.removeItem(at: workspaceRoot) }
+        try writeFile(
+            at: workspaceRoot.appendingPathComponent(".swarm/outside/SKILL.md"),
+            contents: """
+            ---
+            name: outside
+            description: Outside
+            ---
+            This skill must not be loadable through path traversal.
+            """
+        )
+
+        let workspace = try AgentWorkspace(
+            bundleRoot: workspaceRoot,
+            writableRoot: workspaceRoot.appendingPathComponent("Writable", isDirectory: true),
+            indexCacheRoot: workspaceRoot.appendingPathComponent("Cache", isDirectory: true)
+        )
+
+        #expect(throws: AgentWorkspaceError.self) {
+            _ = try workspace.loadSkills(named: ["../outside"])
+        }
+    }
+
     @Test("Workspace validation reports malformed SKILL.md")
     func workspaceValidationReportsMalformedSkill() async throws {
         let workspaceRoot = try makeWorkspaceRoot()
