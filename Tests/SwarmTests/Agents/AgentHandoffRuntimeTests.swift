@@ -110,6 +110,49 @@ struct AgentHandoffRuntimeTests {
         let messages = try #require(nestedMessages.first)
         #expect(messages.contains { $0.content == "please route this" })
     }
+
+    @Test("Handoff tool call is recorded on parent result")
+    func handoffToolCallIsRecordedOnParentResult() async throws {
+        let provider = MockInferenceProvider()
+        await provider.setToolCallResponses([
+            InferenceResponse(
+                content: nil,
+                toolCalls: [
+                    InferenceResponse.ParsedToolCall(
+                        id: "call_handoff",
+                        name: "handoff_to_target",
+                        arguments: ["reason": .string("delegate")]
+                    ),
+                ],
+                finishReason: .toolCall,
+                usage: nil
+            ),
+        ])
+        let target = RecordingHandoffReceiver(name: "target-agent")
+        let handoff = HandoffConfiguration(
+            targetAgent: target,
+            toolNameOverride: "handoff_to_target"
+        )
+        let agent = try Agent(
+            tools: [],
+            instructions: "Route to target.",
+            configuration: AgentConfiguration(name: "source-agent", defaultTracingEnabled: false),
+            inferenceProvider: provider,
+            handoffs: [AnyHandoffConfiguration(handoff)]
+        )
+
+        let result = try await agent.run("route this")
+
+        let handoffCall = try #require(result.toolCalls.first)
+        #expect(handoffCall.toolName == "handoff_to_target")
+        #expect(handoffCall.providerCallId == "call_handoff")
+        #expect(handoffCall.arguments["reason"] == .string("delegate"))
+
+        let handoffResult = try #require(result.toolResults.first)
+        #expect(handoffResult.callId == handoffCall.id)
+        #expect(handoffResult.isSuccess)
+        #expect(handoffResult.output == .string("handled route this"))
+    }
 }
 
 private actor RecordingHandoffReceiver: HandoffReceiver {

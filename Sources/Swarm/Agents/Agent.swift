@@ -2125,6 +2125,12 @@ public struct Agent: AgentRuntime, Sendable {
 
                 let handoffStart = ContinuousClock.now
                 let spanId = await tracing?.traceToolCall(name: parsedCall.name, arguments: parsedCall.arguments)
+                let handoffCall = ToolCall(
+                    providerCallId: parsedCall.id,
+                    toolName: parsedCall.name,
+                    arguments: parsedCall.arguments
+                )
+                _ = resultBuilder.addToolCall(handoffCall)
                 await observer?.onHandoff(context: context, fromAgent: self, toAgent: targetAgent)
 
                 // Find the last user message to use as handoff input
@@ -2169,12 +2175,28 @@ public struct Agent: AgentRuntime, Sendable {
                     context: requestContext
                 )
 
-                let result = try await executeWithinRemainingTimeout(startTime: startTime) {
-                    if let receiver = targetAgent as? any HandoffReceiver {
-                        try await receiver.handleHandoff(handoffRequest, context: handoffContext)
-                    } else {
-                        try await targetAgent.run(transformedData.input, session: nil, observer: observer)
+                let result: AgentResult
+                do {
+                    result = try await executeWithinRemainingTimeout(startTime: startTime) {
+                        if let receiver = targetAgent as? any HandoffReceiver {
+                            try await receiver.handleHandoff(handoffRequest, context: handoffContext)
+                        } else {
+                            try await targetAgent.run(transformedData.input, session: nil, observer: observer)
+                        }
                     }
+                } catch {
+                    let handoffDuration = ContinuousClock.now - handoffStart
+                    _ = resultBuilder.addToolResult(
+                        ToolResult.failure(
+                            callId: handoffCall.id,
+                            error: error.localizedDescription,
+                            duration: handoffDuration
+                        )
+                    )
+                    if let spanId {
+                        await tracing?.traceToolError(spanId: spanId, name: parsedCall.name, error: error)
+                    }
+                    throw error
                 }
                 conversationHistory.append(.toolResult(
                     toolName: parsedCall.name,
@@ -2190,8 +2212,15 @@ public struct Agent: AgentRuntime, Sendable {
                     )
                 )
 
+                let handoffDuration = ContinuousClock.now - handoffStart
+                _ = resultBuilder.addToolResult(
+                    ToolResult.success(
+                        callId: handoffCall.id,
+                        output: .string(result.output),
+                        duration: handoffDuration
+                    )
+                )
                 if let spanId {
-                    let handoffDuration = ContinuousClock.now - handoffStart
                     await tracing?.traceToolResult(spanId: spanId, name: parsedCall.name, result: result.output, duration: handoffDuration)
                 }
 
