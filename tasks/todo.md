@@ -8,7 +8,7 @@
 - [x] SWARM-AUDIT-032: add focused observability tests for thought/plan/tool/error metadata redaction, then make SwiftLog/OSLog output privacy-safe by default.
 - [x] SWARM-AUDIT-038: inspect branch task/audit notes and web/security/observability code for any remaining concrete issue; if stale, document evidence and add proof where useful.
 - [x] Run focused tests after each fix, then run a broader relevant test slice before pushing.
-- [ ] Commit one code-changing issue per commit, push `codex/audit-web-security-20260517`, and open a PR against `codex/fix-mcp-text-content-tests` if the cluster is complete.
+- [x] Commit one code-changing issue per commit, push `codex/audit-web-security-20260517`, and open a PR against `codex/fix-mcp-text-content-tests` if the cluster is complete.
 
 ## Assumptions To Verify
 
@@ -25,7 +25,7 @@
 - [x] SWARM-AUDIT-032 complete.
 - [x] SWARM-AUDIT-038 complete.
 - [x] Final verification complete.
-- [ ] Pushed and PR created.
+- [x] Pushed and PR created.
 
 ## Review
 
@@ -34,3 +34,4 @@
 - SWARM-AUDIT-032: `swift test --filter ObservabilityPrivacyTests` first failed because no public-log sanitizer existed; after adding the sanitizer and wiring SwiftLog, OSLog, ConsoleTracer, and PrettyConsoleTracer through it, `swift test --filter Observability` passes.
 - SWARM-AUDIT-038: branch notes did not list a separate remaining item, but code inspection found `@Traceable` still generated raw argument, result, and error metadata. `swift test --filter TraceableMacroTests/testTraceableMacroExpansion` failed with the raw expansion, then passed after updating the macro to emit counts, argument keys, lengths, duration, and error type only. `swift test --filter TraceableMacroTests` passes.
 - Final verification before push: `swift test --filter WebSearchSupportTests`, `swift test --filter Observability`, and `swift test --filter TraceableMacroTests` all pass.
+- Pushed `codex/audit-web-security-20260517` and updated PR https://github.com/christopherkarani/Swarm/pull/103 against `codex/fix-mcp-text-content-tests`.
