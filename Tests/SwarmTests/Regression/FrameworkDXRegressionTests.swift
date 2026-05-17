@@ -190,15 +190,7 @@ struct FrameworkDXRegressionTests {
                 .run("input")
         }
 
-        var agentIsBlocked = false
-        for _ in 0 ..< 100 {
-            if await agent.isBlocked {
-                agentIsBlocked = true
-                break
-            }
-            try await Task.sleep(for: .milliseconds(1))
-        }
-        #expect(agentIsBlocked)
+        await agent.waitUntilBlocked()
 
         do {
             _ = try await task.value
@@ -456,14 +448,27 @@ private actor BlockingWorkflowAgent: AgentRuntime {
     nonisolated let instructions = "Block until released."
     nonisolated let configuration = AgentConfiguration.default
     private var continuation: CheckedContinuation<Void, Never>?
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
 
     var isBlocked: Bool {
         continuation != nil
     }
 
+    func waitUntilBlocked() async {
+        if continuation != nil {
+            return
+        }
+        await withCheckedContinuation { waiter in
+            blockedWaiters.append(waiter)
+        }
+    }
+
     func run(_ input: String, session _: (any Session)?, observer _: (any AgentObserver)?) async throws -> AgentResult {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
+            let waiters = blockedWaiters
+            blockedWaiters.removeAll()
+            waiters.forEach { $0.resume() }
         }
         return AgentResult(output: input)
     }
