@@ -170,6 +170,18 @@ struct WebSearchSupportTests {
         #expect(RedirectWebFetchURLProtocol.didLoadBody == false)
     }
 
+    @Test("Safe web fetch body accumulator rejects overflow chunks before appending")
+    func bodyAccumulatorRejectsOverflowBeforeAppend() throws {
+        var accumulator = SafeWebBodyAccumulator()
+        try accumulator.append(Data(repeating: 0x41, count: 5), maxBodyBytes: 5)
+
+        #expect(accumulator.data.count == 5)
+        #expect(throws: AgentError.self) {
+            try accumulator.append(Data([0x42]), maxBodyBytes: 5)
+        }
+        #expect(accumulator.data == Data(repeating: 0x41, count: 5))
+    }
+
     @Test("Merged hits prefer close cached results")
     func mergeHitsPrefersUsefulCachedHits() {
         let cached = WebSearchHit(

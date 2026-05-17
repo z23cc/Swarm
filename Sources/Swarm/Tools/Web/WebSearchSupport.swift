@@ -1294,7 +1294,7 @@ internal struct SafeWebFetcher: Sendable {
             request.setValue(conditionalLastModified, forHTTPHeaderField: "If-Modified-Since")
         }
 
-        let fetchDelegate = SafeWebFetchDelegate()
+        let fetchDelegate = SafeWebFetchDelegate(maxBodyBytes: configuration.maxBodyBytes)
         let session = URLSession(
             configuration: sessionConfiguration,
             delegate: fetchDelegate,
@@ -1390,7 +1390,12 @@ internal struct SafeWebFetcher: Sendable {
 }
 
 private final class SafeWebFetchDelegate: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+    private let maxBodyBytes: Int
     private let state = SafeWebFetchDelegateState()
+
+    init(maxBodyBytes: Int) {
+        self.maxBodyBytes = maxBodyBytes
+    }
 
     func fetch(_ request: URLRequest, using session: URLSession) async throws -> (Data, URLResponse) {
         let task = session.dataTask(with: request)
@@ -1423,10 +1428,15 @@ private final class SafeWebFetchDelegate: NSObject, URLSessionDataDelegate, URLS
 
     func urlSession(
         _: URLSession,
-        dataTask _: URLSessionDataTask,
+        dataTask: URLSessionDataTask,
         didReceive data: Data
     ) {
-        state.receive(data: data)
+        do {
+            try state.receive(data: data, maxBodyBytes: maxBodyBytes)
+        } catch {
+            state.finish(throwing: error)
+            dataTask.cancel()
+        }
     }
 
     func urlSession(
@@ -1467,7 +1477,7 @@ private final class SafeWebFetchDelegateState: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
     private var response: URLResponse?
-    private var data = Data()
+    private var accumulator = SafeWebBodyAccumulator()
     private var isFinished = false
 
     func start(_ continuation: CheckedContinuation<(Data, URLResponse), Error>) {
@@ -1482,9 +1492,9 @@ private final class SafeWebFetchDelegateState: @unchecked Sendable {
         }
     }
 
-    func receive(data newData: Data) {
-        lock.withLock {
-            data.append(newData)
+    func receive(data newData: Data, maxBodyBytes: Int) throws {
+        try lock.withLock {
+            try accumulator.append(newData, maxBodyBytes: maxBodyBytes)
         }
     }
 
@@ -1500,7 +1510,7 @@ private final class SafeWebFetchDelegateState: @unchecked Sendable {
                     )
                 )
             }
-            return .success((data, response))
+            return .success((accumulator.data, response))
         }
         resume(with: result)
     }
@@ -1535,6 +1545,21 @@ private final class SafeWebFetchDelegateState: @unchecked Sendable {
 
 private enum SafeWebFetchCompletion: Error {
     case alreadyFinished
+}
+
+internal struct SafeWebBodyAccumulator: Sendable {
+    private(set) var data = Data()
+
+    mutating func append(_ newData: Data, maxBodyBytes: Int) throws {
+        let nextCount = data.count + newData.count
+        guard nextCount <= maxBodyBytes else {
+            throw AgentError.toolExecutionFailed(
+                toolName: "websearch",
+                underlyingError: "Fetched body exceeded limit of \(maxBodyBytes) bytes"
+            )
+        }
+        data.append(newData)
+    }
 }
 
 private enum ResolvedHostAddress: Sendable {
