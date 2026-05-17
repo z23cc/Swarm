@@ -175,6 +175,77 @@ struct AgentHandoffRuntimeTests {
         #expect(messages.contains { $0.role == .user && $0.content == "target-only payload" })
     }
 
+    @Test("Nested handoff history preserves completed tool pairs for regular Agent targets")
+    func nestedHandoffHistoryPreservesCompletedToolPairsForRegularAgentTargets() async throws {
+        let sourceProvider = MockInferenceProvider()
+        await sourceProvider.setToolCallResponses([
+            InferenceResponse(
+                content: nil,
+                toolCalls: [
+                    InferenceResponse.ParsedToolCall(
+                        id: "call_lookup",
+                        name: "lookup_tool",
+                        arguments: [:]
+                    ),
+                ],
+                finishReason: .toolCall,
+                usage: nil
+            ),
+            InferenceResponse(
+                content: nil,
+                toolCalls: [
+                    InferenceResponse.ParsedToolCall(
+                        id: "call_handoff",
+                        name: "handoff_to_target",
+                        arguments: ["reason": .string("delegate")]
+                    ),
+                ],
+                finishReason: .toolCall,
+                usage: nil
+            ),
+        ])
+
+        let targetProvider = MockInferenceProvider(responses: ["target done"])
+        let target = try Agent(
+            tools: [],
+            instructions: "Use prior context.",
+            configuration: AgentConfiguration(name: "target-agent", defaultTracingEnabled: false),
+            memory: ConversationMemory(),
+            inferenceProvider: targetProvider
+        )
+        let handoff = HandoffConfiguration(
+            targetAgent: target,
+            toolNameOverride: "handoff_to_target",
+            nestHandoffHistory: true
+        )
+        let source = try Agent(
+            tools: [MockTool(name: "lookup_tool", result: .string("lookup result"))],
+            instructions: "Look up context, then route to target.",
+            configuration: AgentConfiguration(name: "source-agent", defaultTracingEnabled: false),
+            memory: ConversationMemory(),
+            inferenceProvider: sourceProvider,
+            handoffs: [AnyHandoffConfiguration(handoff)]
+        )
+
+        _ = try await source.run("please route this")
+
+        let targetCalls = await targetProvider.generateMessageCalls
+        let messages = try #require(targetCalls.first?.messages)
+        let assistantMessages = messages.filter { $0.role == .assistant }
+        let toolMessages = messages.filter { $0.role == .tool }
+
+        #expect(assistantMessages.contains {
+            $0.toolCalls.contains { $0.id == "call_lookup" && $0.name == "lookup_tool" }
+        })
+        #expect(toolMessages.contains {
+            $0.toolCallID == "call_lookup" && $0.name == "lookup_tool" && $0.content == "lookup result"
+        })
+        #expect(!assistantMessages.contains {
+            $0.toolCalls.contains { $0.id == "call_handoff" || $0.name == "handoff_to_target" }
+        })
+        #expect(!toolMessages.contains { $0.toolCallID == "call_handoff" || $0.name == "handoff_to_target" })
+    }
+
     @Test("Handoff tool call is recorded on parent result")
     func handoffToolCallIsRecordedOnParentResult() async throws {
         let provider = MockInferenceProvider()

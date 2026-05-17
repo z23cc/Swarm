@@ -2173,7 +2173,11 @@ public struct Agent: AgentRuntime, Sendable {
                 await applyContextValues(requestContext, to: handoffContext)
                 await preserveExecutionPath(from: context, in: handoffContext)
                 if handoffConfig.nestHandoffHistory {
-                    await addNestedHandoffHistory(conversationHistory, to: handoffContext)
+                    await addNestedHandoffHistory(
+                        conversationHistory,
+                        to: handoffContext,
+                        skippingToolCallID: parsedCall.id
+                    )
                 }
 
                 let handoffRequest = HandoffRequest(
@@ -2313,7 +2317,8 @@ public struct Agent: AgentRuntime, Sendable {
 
     private func addNestedHandoffHistory(
         _ conversationHistory: [ConversationMessage],
-        to context: AgentContext
+        to context: AgentContext,
+        skippingToolCallID skippedToolCallID: String?
     ) async {
         for message in conversationHistory {
             switch message {
@@ -2322,17 +2327,21 @@ public struct Agent: AgentRuntime, Sendable {
             case let .user(content):
                 await context.addMessage(SwarmTranscriptCodec.encodeMessage(role: .user, content: content))
             case let .assistant(content, toolCalls):
-                guard toolCalls.isEmpty else {
+                let nestedToolCalls = toolCalls.filter { $0.id != skippedToolCallID }
+                guard toolCalls.isEmpty || !nestedToolCalls.isEmpty else {
                     continue
                 }
                 await context.addMessage(
                     SwarmTranscriptCodec.encodeMessage(
                         role: .assistant,
                         content: content,
-                        toolCalls: toolCalls
+                        toolCalls: nestedToolCalls
                     )
                 )
             case let .toolResult(toolName, result, toolCallID):
+                guard toolCallID != skippedToolCallID else {
+                    continue
+                }
                 await context.addMessage(
                     SwarmTranscriptCodec.encodeMessage(
                         role: .tool,
