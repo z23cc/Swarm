@@ -1330,6 +1330,8 @@ public struct Agent: AgentRuntime, Sendable {
         )
         var transcriptMessages: [MemoryMessage] = []
         let systemMessage = buildSystemMessage(memory: activeMemory, memoryContext: memoryContext)
+        let executionContext = AgentContext(input: input)
+        await executionContext.recordExecution(agentName: name)
 
         let enableStreaming = configuration.enableStreaming && observer != nil
         let structuredToolStreamingProvider = provider as? any ToolCallStreamingConversationInferenceProvider
@@ -1420,7 +1422,10 @@ public struct Agent: AgentRuntime, Sendable {
                 } else {
                     rawPrompt = buildPrompt(from: conversationHistory)
                 }
-                let unplannedSchemas = await buildToolSchemasWithHandoffs(toolRegistry: toolRegistry)
+                let unplannedSchemas = await buildToolSchemasWithHandoffs(
+                    toolRegistry: toolRegistry,
+                    context: executionContext
+                )
                 var plannedPrompt = rawPrompt
                 var plannedSchemas = MembraneInternalTools.sortedSchemas(unplannedSchemas)
 
@@ -1534,6 +1539,7 @@ public struct Agent: AgentRuntime, Sendable {
                         observer: observer,
                         tracing: tracing,
                         membraneAdapter: membraneAdapter,
+                        context: executionContext,
                         startTime: startTime
                     )
                     // If a handoff occurred, return the target agent's result
@@ -2034,10 +2040,13 @@ public struct Agent: AgentRuntime, Sendable {
     ///
     /// This merges regular tool schemas with handoff-generated schemas,
     /// allowing handoffs to appear as callable tools in the LLM prompt.
-    private func buildToolSchemasWithHandoffs(toolRegistry: ToolRegistry) async -> [ToolSchema] {
+    private func buildToolSchemasWithHandoffs(
+        toolRegistry: ToolRegistry,
+        context: AgentContext
+    ) async -> [ToolSchema] {
         var schemas = await toolRegistry.schemas
 
-        for handoff in _handoffs {
+        for handoff in await activeHandoffs(context: context) {
             let handoffSchema = ToolSchema(
                 name: handoff.effectiveToolName,
                 description: handoff.effectiveToolDescription,
@@ -2056,6 +2065,19 @@ public struct Agent: AgentRuntime, Sendable {
         return MembraneInternalTools.sortedSchemas(schemas)
     }
 
+    private func activeHandoffs(context: AgentContext) async -> [AnyHandoffConfiguration] {
+        var active: [AnyHandoffConfiguration] = []
+
+        for handoff in _handoffs {
+            if let when = handoff.when, await !when(context, handoff.targetAgent) {
+                continue
+            }
+            active.append(handoff)
+        }
+
+        return active
+    }
+
     /// Processes tool calls, handling both regular tools and handoff tools.
     ///
     /// When a tool call matches a handoff's `effectiveToolName`, the target agent
@@ -2070,6 +2092,7 @@ public struct Agent: AgentRuntime, Sendable {
         observer: (any AgentObserver)?,
         tracing: TracingHelper?,
         membraneAdapter: (any MembraneAgentAdapter)?,
+        context: AgentContext,
         startTime: ContinuousClock.Instant
     ) async throws -> FinalAssistantResponse? {
         let handoffMap = Dictionary(
@@ -2090,12 +2113,19 @@ public struct Agent: AgentRuntime, Sendable {
         for parsedCall in response.toolCalls {
             // Check if this is a handoff tool call
             if let handoffConfig = handoffMap[parsedCall.name] {
+                if let when = handoffConfig.when, await !when(context, handoffConfig.targetAgent) {
+                    throw AgentError.toolExecutionFailed(
+                        toolName: parsedCall.name,
+                        underlyingError: "Handoff is not enabled"
+                    )
+                }
+
                 let reason = parsedCall.arguments["reason"]?.stringValue ?? ""
                 let targetAgent = handoffConfig.targetAgent
 
                 let handoffStart = ContinuousClock.now
                 let spanId = await tracing?.traceToolCall(name: parsedCall.name, arguments: parsedCall.arguments)
-                await observer?.onHandoff(context: nil, fromAgent: self, toAgent: targetAgent)
+                await observer?.onHandoff(context: context, fromAgent: self, toAgent: targetAgent)
 
                 // Find the last user message to use as handoff input
                 let lastUserMessage = conversationHistory.last(where: {
@@ -2108,8 +2138,43 @@ public struct Agent: AgentRuntime, Sendable {
                     reason.isEmpty ? "Continue the conversation" : reason
                 }
 
+                let handoffData = HandoffInputData(
+                    sourceAgentName: name,
+                    targetAgentName: targetAgent.name,
+                    input: handoffInput,
+                    context: await context.snapshot,
+                    metadata: reason.isEmpty ? [:] : ["reason": .string(reason)]
+                )
+
+                if let onTransfer = handoffConfig.onTransfer {
+                    do {
+                        try await onTransfer(context, handoffData)
+                    } catch {
+                        Log.agents.warning("Handoff onTransfer callback failed for \(parsedCall.name): \(error)")
+                    }
+                }
+
+                let transformedData = handoffConfig.transform?(handoffData) ?? handoffData
+                let requestContext = transformedData.context.merging(transformedData.metadata) { _, new in new }
+                let handoffContext = await context.copy(additionalValues: requestContext)
+                if handoffConfig.nestHandoffHistory {
+                    await addNestedHandoffHistory(conversationHistory, to: handoffContext)
+                }
+
+                let handoffRequest = HandoffRequest(
+                    sourceAgentName: transformedData.sourceAgentName,
+                    targetAgentName: transformedData.targetAgentName,
+                    input: transformedData.input,
+                    reason: reason.isEmpty ? nil : reason,
+                    context: requestContext
+                )
+
                 let result = try await executeWithinRemainingTimeout(startTime: startTime) {
-                    try await targetAgent.run(handoffInput, session: nil, observer: observer)
+                    if let receiver = targetAgent as? any HandoffReceiver {
+                        try await receiver.handleHandoff(handoffRequest, context: handoffContext)
+                    } else {
+                        try await targetAgent.run(transformedData.input, session: nil, observer: observer)
+                    }
                 }
                 conversationHistory.append(.toolResult(
                     toolName: parsedCall.name,
@@ -2164,6 +2229,37 @@ public struct Agent: AgentRuntime, Sendable {
         }
 
         return nil
+    }
+
+    private func addNestedHandoffHistory(
+        _ conversationHistory: [ConversationMessage],
+        to context: AgentContext
+    ) async {
+        for message in conversationHistory {
+            switch message {
+            case let .system(content):
+                await context.addMessage(SwarmTranscriptCodec.encodeMessage(role: .system, content: content))
+            case let .user(content):
+                await context.addMessage(SwarmTranscriptCodec.encodeMessage(role: .user, content: content))
+            case let .assistant(content, toolCalls):
+                await context.addMessage(
+                    SwarmTranscriptCodec.encodeMessage(
+                        role: .assistant,
+                        content: content,
+                        toolCalls: toolCalls
+                    )
+                )
+            case let .toolResult(toolName, result, toolCallID):
+                await context.addMessage(
+                    SwarmTranscriptCodec.encodeMessage(
+                        role: .tool,
+                        content: result,
+                        toolName: toolName,
+                        toolCallID: toolCallID
+                    )
+                )
+            }
+        }
     }
 
     // MARK: - Prompt Building
