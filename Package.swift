@@ -38,7 +38,7 @@ var packageDependencies: [Package.Dependency] = [
     .package(url: "https://github.com/christopherkarani/Wax.git", exact: "0.1.20"),
     .package(
         url: "https://github.com/christopherkarani/Conduit",
-        exact: "0.3.14",
+        exact: "0.3.16",
         traits: [
             .trait(name: "OpenAI"),
             .trait(name: "OpenRouter"),

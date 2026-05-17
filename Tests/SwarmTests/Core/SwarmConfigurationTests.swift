@@ -80,6 +80,22 @@ struct SwarmConfigurationTests {
         }
     }
 
+    @Test("cloudProvider takes priority over defaultProvider for tool agents")
+    func cloudProviderTakesPriorityOverDefaultForToolAgents() async throws {
+        try await withIsolatedConfiguration {
+            let defaultMock = MockInferenceProvider(responses: ["from default"])
+            let cloudMock = MockInferenceProvider(responses: ["from cloud"])
+            await Swarm.configure(provider: defaultMock)
+            await Swarm.configure(cloudProvider: cloudMock)
+
+            let tool = MockTool(name: "test_tool")
+            let agent = try Agent(tools: [tool], instructions: "test")
+            let result = try await agent.run("use tool")
+
+            #expect(result.output == "from cloud")
+        }
+    }
+
     @Test("defaultProvider preferred over cloudProvider for toolless agents")
     func defaultPreferredOverCloud() async throws {
         try await withIsolatedConfiguration {
@@ -98,6 +114,23 @@ struct SwarmConfigurationTests {
         try await withIsolatedConfiguration {
             let cloudMock = MockInferenceProvider(responses: ["from handoff-cloud"])
             let handoffProvider = MockInferenceProvider(responses: ["unused"])
+            await Swarm.configure(cloudProvider: cloudMock)
+
+            let handoffTarget = try Agent(instructions: "handoff target", inferenceProvider: handoffProvider)
+            let agent = try Agent(instructions: "route", handoffAgents: [handoffTarget])
+
+            let result = try await agent.run("transfer me")
+            #expect(result.output == "from handoff-cloud")
+        }
+    }
+
+    @Test("cloudProvider takes priority over defaultProvider for handoff agents")
+    func cloudProviderTakesPriorityOverDefaultForHandoffAgents() async throws {
+        try await withIsolatedConfiguration {
+            let defaultMock = MockInferenceProvider(responses: ["from default"])
+            let cloudMock = MockInferenceProvider(responses: ["from handoff-cloud"])
+            let handoffProvider = MockInferenceProvider(responses: ["unused"])
+            await Swarm.configure(provider: defaultMock)
             await Swarm.configure(cloudProvider: cloudMock)
 
             let handoffTarget = try Agent(instructions: "handoff target", inferenceProvider: handoffProvider)
