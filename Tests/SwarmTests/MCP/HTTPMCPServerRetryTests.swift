@@ -75,6 +75,15 @@ struct HTTPMCPServerRetryTests {
                                                 "description": "Query source",
                                                 "enum": ["docs", "news"]
                                             ],
+                                            "category": [
+                                                "type": "string",
+                                                "description": "Content category",
+                                                "oneOf": [
+                                                    ["enum": ["guide", "api"]],
+                                                    ["const": "blog"],
+                                                    ["enum": ["release", "example"]]
+                                                ]
+                                            ],
                                             "limit": [
                                                 "type": "integer",
                                                 "description": "Maximum results",
@@ -130,6 +139,10 @@ struct HTTPMCPServerRetryTests {
         let query = try #require(payloadProperties.first { $0.name == "query" })
         #expect(query.isRequired)
         #expect(query.type == .oneOf(["docs", "news"]))
+
+        let category = try #require(payloadProperties.first { $0.name == "category" })
+        #expect(!category.isRequired)
+        #expect(category.type == .oneOf(["guide", "api", "blog", "release", "example"]))
 
         let limit = try #require(payloadProperties.first { $0.name == "limit" })
         #expect(!limit.isRequired)

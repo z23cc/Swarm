@@ -596,14 +596,14 @@ public actor HTTPMCPServer: MCPServer {
             return nil
         }
 
-        let values = oneOf.compactMap { option -> String? in
+        let values = oneOf.flatMap { option -> [String] in
             guard let optionDict = option.dictionaryValue else {
-                return nil
+                return []
             }
             if let constValue = optionDict["const"]?.stringValue {
-                return constValue
+                return [constValue]
             }
-            return optionDict["enum"]?.arrayValue?.compactMap(\.stringValue).first
+            return optionDict["enum"]?.arrayValue?.compactMap(\.stringValue) ?? []
         }
         return values.isEmpty ? nil : values
     }
