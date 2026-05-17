@@ -1,4 +1,5 @@
 import Foundation
+import MembraneCore
 @testable import Swarm
 import Testing
 
@@ -307,6 +308,26 @@ struct MembraneIntegrationTests {
         #expect(names.contains("beta"))
         #expect(names.contains("gamma"))
     }
+
+    @Test("Wax membrane pointer recall does not index private payload bytes")
+    func waxMembranePointerRecallDoesNotIndexPrivatePayloadBytes() async throws {
+        let storage = WaxMembraneStorage(url: temporaryWaxStoreURL())
+        let secret = "SWARM-AUDIT-040-private-payload-\(UUID().uuidString)"
+        _ = try await storage.store(
+            payload: Data(secret.utf8),
+            dataType: .document,
+            summary: "Public pointer summary only"
+        )
+
+        let secretMatches = try await storage.recall(query: secret, limit: 5)
+        #expect(secretMatches.allSatisfy { !$0.content.contains(secret) })
+
+        let summaryMatches = try await storage.recall(query: "Public pointer summary", limit: 5)
+        #expect(summaryMatches.contains { $0.content.contains("Public pointer summary") })
+        #expect(summaryMatches.allSatisfy { !$0.content.contains(secret) })
+        #expect(summaryMatches.allSatisfy { !$0.content.contains("__payload_base64__") })
+        #expect(summaryMatches.allSatisfy { !$0.content.contains(Data(secret.utf8).base64EncodedString()) })
+    }
 }
 
 private func defaultAdapterToolSchemas() -> [ToolSchema] {
@@ -369,6 +390,13 @@ private func makeTestTools(count: Int) -> [any AnyJSONTool] {
     (0 ..< count).map { index in
         MembraneTestTool(name: String(format: "tool_%02d", count - index))
     }
+}
+
+private func temporaryWaxStoreURL() -> URL {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SwarmMembraneIntegrationTests", isDirectory: true)
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    return root.appendingPathComponent("\(UUID().uuidString).mv2s")
 }
 
 private struct MembraneTestTool: AnyJSONTool, Sendable {
