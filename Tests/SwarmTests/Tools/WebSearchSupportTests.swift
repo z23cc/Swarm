@@ -170,6 +170,43 @@ struct WebSearchSupportTests {
         #expect(RedirectWebFetchURLProtocol.didLoadBody == false)
     }
 
+    @Test("Safe web fetcher cancels URLSession task when caller cancels")
+    func fetcherCancelsURLSessionTaskWhenCallerCancels() async throws {
+        CancellableWebFetchURLProtocol.reset()
+        defer { CancellableWebFetchURLProtocol.reset() }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("swarm-web-cancellation-tests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+
+        let configuration = WebSearchTool.Configuration(
+            apiKey: nil,
+            persistFetchedArtifacts: false,
+            storeURL: root,
+            enabled: true
+        )
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [CancellableWebFetchURLProtocol.self]
+        let fetcher = SafeWebFetcher(configuration: configuration, sessionConfiguration: sessionConfiguration)
+        let url = try #require(URL(string: "https://example.com/slow"))
+
+        let fetchTask = Task {
+            try await fetcher.fetch(url: url, conditionalEtag: nil, conditionalLastModified: nil)
+        }
+        for _ in 0 ..< 100 where !CancellableWebFetchURLProtocol.didStartLoading {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(CancellableWebFetchURLProtocol.didStartLoading)
+        fetchTask.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            _ = try await fetchTask.value
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(CancellableWebFetchURLProtocol.didStopLoading)
+    }
+
     @Test("Safe web fetch body accumulator rejects overflow chunks before appending")
     func bodyAccumulatorRejectsOverflowBeforeAppend() throws {
         var accumulator = SafeWebBodyAccumulator()
@@ -331,5 +368,73 @@ private final class BodyLoadState: @unchecked Sendable {
 
     func reset() {
         lock.withLock { bodyLoaded = false }
+    }
+}
+
+private final class CancellableWebFetchURLProtocol: URLProtocol {
+    private static let state = CancellationState()
+
+    static var didStopLoading: Bool {
+        state.didStopLoading
+    }
+
+    static var didStartLoading: Bool {
+        state.didStartLoading
+    }
+
+    static func reset() {
+        state.reset()
+    }
+
+    override class func canInit(with _: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        Self.state.markStarted()
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "text/plain"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    }
+
+    override func stopLoading() {
+        Self.state.markStopped()
+    }
+}
+
+private final class CancellationState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var started = false
+    private var stopped = false
+
+    var didStartLoading: Bool {
+        lock.withLock { started }
+    }
+
+    var didStopLoading: Bool {
+        lock.withLock { stopped }
+    }
+
+    func markStarted() {
+        lock.withLock { started = true }
+    }
+
+    func markStopped() {
+        lock.withLock { stopped = true }
+    }
+
+    func reset() {
+        lock.withLock {
+            started = false
+            stopped = false
+        }
     }
 }

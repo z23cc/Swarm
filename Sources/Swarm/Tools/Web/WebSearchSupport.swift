@@ -1398,10 +1398,15 @@ private final class SafeWebFetchDelegate: NSObject, URLSessionDataDelegate, URLS
     }
 
     func fetch(_ request: URLRequest, using session: URLSession) async throws -> (Data, URLResponse) {
-        let task = session.dataTask(with: request)
-        return try await withCheckedThrowingContinuation { continuation in
-            state.start(continuation)
-            task.resume()
+        let task = SafeWebFetchTask(session.dataTask(with: request))
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                state.start(continuation)
+                task.resume()
+            }
+        } onCancel: {
+            task.cancel()
+            state.finish(throwing: CancellationError())
         }
     }
 
@@ -1473,16 +1478,41 @@ private final class SafeWebFetchDelegate: NSObject, URLSessionDataDelegate, URLS
     }
 }
 
+private final class SafeWebFetchTask: @unchecked Sendable {
+    private let task: URLSessionDataTask
+
+    init(_ task: URLSessionDataTask) {
+        self.task = task
+    }
+
+    func resume() {
+        task.resume()
+    }
+
+    func cancel() {
+        task.cancel()
+    }
+}
+
 private final class SafeWebFetchDelegateState: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
     private var response: URLResponse?
     private var accumulator = SafeWebBodyAccumulator()
     private var isFinished = false
+    private var finishedResult: Result<(Data, URLResponse), Error>?
 
     func start(_ continuation: CheckedContinuation<(Data, URLResponse), Error>) {
-        lock.withLock {
+        let result: Result<(Data, URLResponse), Error>? = lock.withLock {
+            if isFinished {
+                return finishedResult ?? .failure(CancellationError())
+            }
             self.continuation = continuation
+            return nil
+        }
+
+        if let result {
+            Self.resume(continuation, with: result)
         }
     }
 
@@ -1503,14 +1533,18 @@ private final class SafeWebFetchDelegateState: @unchecked Sendable {
             guard isFinished == false else { return .failure(SafeWebFetchCompletion.alreadyFinished) }
             isFinished = true
             guard let response else {
-                return .failure(
+                let result: Result<(Data, URLResponse), Error> = .failure(
                     AgentError.toolExecutionFailed(
                         toolName: "websearch",
                         underlyingError: "Fetch returned no response"
                     )
                 )
+                finishedResult = result
+                return result
             }
-            return .success((accumulator.data, response))
+            let result: Result<(Data, URLResponse), Error> = .success((accumulator.data, response))
+            finishedResult = result
+            return result
         }
         resume(with: result)
     }
@@ -1519,7 +1553,9 @@ private final class SafeWebFetchDelegateState: @unchecked Sendable {
         let result: Result<(Data, URLResponse), Error> = lock.withLock {
             guard isFinished == false else { return .failure(SafeWebFetchCompletion.alreadyFinished) }
             isFinished = true
-            return .failure(error)
+            let result: Result<(Data, URLResponse), Error> = .failure(error)
+            finishedResult = result
+            return result
         }
         resume(with: result)
     }
@@ -1531,6 +1567,13 @@ private final class SafeWebFetchDelegateState: @unchecked Sendable {
             return current
         }
         guard let continuation else { return }
+        Self.resume(continuation, with: result)
+    }
+
+    private static func resume(
+        _ continuation: CheckedContinuation<(Data, URLResponse), Error>,
+        with result: Result<(Data, URLResponse), Error>
+    ) {
         switch result {
         case let .success(value):
             continuation.resume(returning: value)
