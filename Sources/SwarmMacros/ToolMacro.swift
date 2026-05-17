@@ -84,7 +84,7 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
         }
         let typeName = structDecl.name.text
 
-        // Derive tool name from type name (lowercase, remove "Tool" suffix)
+        // Derive tool name from type name (snake_case, remove "Tool" suffix)
         let toolName = deriveToolName(from: typeName)
 
         // Find all @Parameter annotated properties
@@ -155,11 +155,10 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
     private static func extractDescription(from node: AttributeSyntax) -> String? {
         guard let arguments = node.arguments?.as(LabeledExprListSyntax.self),
               let firstArg = arguments.first,
-              let stringLiteral = firstArg.expression.as(StringLiteralExprSyntax.self),
-              let segment = stringLiteral.segments.first?.as(StringSegmentSyntax.self) else {
+              let stringLiteral = firstArg.expression.as(StringLiteralExprSyntax.self) else {
             return nil
         }
-        return segment.content.text
+        return extractStaticStringLiteral(from: stringLiteral)
     }
 
     /// Derives the tool name from the type name.
@@ -169,8 +168,18 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
         if name.hasSuffix("Tool") {
             name = String(name.dropLast(4))
         }
-        // Convert to lowercase
-        return name.lowercased()
+        var output = ""
+        for character in name {
+            if character.isUppercase {
+                if !output.isEmpty {
+                    output.append("_")
+                }
+                output.append(character.lowercased())
+            } else {
+                output.append(character)
+            }
+        }
+        return output
     }
 
     /// Extracts @Parameter annotated properties from the declaration.
@@ -237,9 +246,8 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
         // First unlabeled argument is the description
         for arg in arguments {
             if arg.label == nil,
-               let stringLiteral = arg.expression.as(StringLiteralExprSyntax.self),
-               let segment = stringLiteral.segments.first?.as(StringSegmentSyntax.self) {
-                return segment.content.text
+               let stringLiteral = arg.expression.as(StringLiteralExprSyntax.self) {
+                return extractStaticStringLiteral(from: stringLiteral)
             }
         }
         return nil
@@ -265,8 +273,8 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
                 var options: [String] = []
                 for element in arrayExpr.elements {
                     if let stringLiteral = element.expression.as(StringLiteralExprSyntax.self),
-                       let segment = stringLiteral.segments.first?.as(StringSegmentSyntax.self) {
-                        options.append(segment.content.text)
+                       let option = extractStaticStringLiteral(from: stringLiteral) {
+                        options.append(option)
                     }
                 }
                 return options
@@ -300,8 +308,8 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
 
             return """
                 ToolParameter(
-                    name: "\(param.name)",
-                    description: "\(param.description)",
+                    name: \(stringLiteral(param.name)),
+                    description: \(stringLiteral(param.description)),
                     type: \(paramType),
                     isRequired: \(isRequired)\(defaultValueStr)
                 )
@@ -315,7 +323,7 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
     private static func mapSwiftTypeToParameterType(_ swiftType: String, oneOf: [String]?) -> String {
         // Handle oneOf first
         if let options = oneOf, !options.isEmpty {
-            let optionsStr = options.map { "\"\($0)\"" }.joined(separator: ", ")
+            let optionsStr = options.map(stringLiteral).joined(separator: ", ")
             return ".oneOf([\(optionsStr)])"
         }
 
@@ -351,7 +359,7 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
     /// Converts a default value to SendableValue syntax.
     private static func convertToSendableValue(_ value: String, type: String) -> String {
         let cleanValue = value.trimmingCharacters(in: .whitespaces)
-        
+
         if cleanValue == "nil" {
             return "nil"
         }
@@ -370,6 +378,110 @@ public struct ToolMacro: MemberMacro, ExtensionMacro {
         default:
             return ".string(\(cleanValue))"
         }
+    }
+
+    private static func stringLiteral(_ value: String) -> String {
+        String(reflecting: value)
+    }
+
+    private static func extractStaticStringLiteral(from stringLiteral: StringLiteralExprSyntax) -> String? {
+        let rawDelimiterCount = stringLiteral.openingQuote.text.prefix { $0 == "#" }.count
+        var value = ""
+
+        for segment in stringLiteral.segments {
+            guard let stringSegment = segment.as(StringSegmentSyntax.self) else {
+                return nil
+            }
+            value += decodeStringLiteralSegment(stringSegment.content.text, rawDelimiterCount: rawDelimiterCount)
+        }
+
+        return value
+    }
+
+    private static func decodeStringLiteralSegment(_ text: String, rawDelimiterCount: Int) -> String {
+        var decoded = ""
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            guard character == "\\" else {
+                decoded.append(character)
+                index = text.index(after: index)
+                continue
+            }
+
+            index = text.index(after: index)
+            var hashCount = 0
+            var scanIndex = index
+            while scanIndex < text.endIndex, text[scanIndex] == "#" {
+                hashCount += 1
+                scanIndex = text.index(after: scanIndex)
+            }
+
+            guard hashCount == rawDelimiterCount, scanIndex < text.endIndex else {
+                decoded.append("\\")
+                continue
+            }
+
+            index = scanIndex
+            let escaped = text[index]
+            switch escaped {
+            case "\"":
+                decoded.append("\"")
+            case "\\":
+                decoded.append("\\")
+            case "0":
+                decoded.append("\0")
+            case "n":
+                decoded.append("\n")
+            case "r":
+                decoded.append("\r")
+            case "t":
+                decoded.append("\t")
+            case "u":
+                if decodeUnicodeEscape(from: text, index: &index, into: &decoded) {
+                    continue
+                }
+                decoded += rawEscape(escaped, rawDelimiterCount: rawDelimiterCount)
+            default:
+                decoded += rawEscape(escaped, rawDelimiterCount: rawDelimiterCount)
+            }
+            index = text.index(after: index)
+        }
+
+        return decoded
+    }
+
+    private static func decodeUnicodeEscape(
+        from text: String,
+        index: inout String.Index,
+        into decoded: inout String
+    ) -> Bool {
+        var scanIndex = text.index(after: index)
+        guard scanIndex < text.endIndex, text[scanIndex] == "{" else {
+            return false
+        }
+
+        scanIndex = text.index(after: scanIndex)
+        var hex = ""
+        while scanIndex < text.endIndex, text[scanIndex] != "}" {
+            hex.append(text[scanIndex])
+            scanIndex = text.index(after: scanIndex)
+        }
+
+        guard scanIndex < text.endIndex,
+              let scalarValue = UInt32(hex, radix: 16),
+              let scalar = UnicodeScalar(scalarValue) else {
+            return false
+        }
+
+        decoded.append(Character(scalar))
+        index = text.index(after: scanIndex)
+        return true
+    }
+
+    private static func rawEscape(_ escaped: Character, rawDelimiterCount: Int) -> String {
+        "\\" + String(repeating: "#", count: rawDelimiterCount) + String(escaped)
     }
 
     /// Generates the execute(arguments:) wrapper method.

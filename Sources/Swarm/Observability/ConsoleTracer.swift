@@ -100,7 +100,7 @@ public actor ConsoleTracer: Tracer {
         }
 
         // Add message
-        parts.append(event.message)
+        parts.append(TraceEventPublicLogSanitizer.message(for: event))
 
         // Add duration if present
         if let duration = event.duration {
@@ -123,7 +123,7 @@ public actor ConsoleTracer: Tracer {
 
         // Print metadata if not empty
         if !event.metadata.isEmpty {
-            printMetadata(event.metadata)
+            printMetadata(TraceEventPublicLogSanitizer.metadata(for: event))
         }
     }
 
@@ -214,19 +214,7 @@ public actor ConsoleTracer: Tracer {
         let prefix = colorized ? "\u{001B}[31m" : ""
         let reset = colorized ? "\u{001B}[0m" : ""
 
-        Log.tracing.error("\(prefix)  Error: \(error.type)\(reset)")
-        Log.tracing.error("\(prefix)  Message: \(error.message)\(reset)")
-
-        if let underlyingError = error.underlyingError {
-            Log.tracing.error("\(prefix)  Underlying: \(underlyingError)\(reset)")
-        }
-
-        if let stackTrace = error.stackTrace {
-            Log.tracing.error("\(prefix)  Stack Trace:\(reset)")
-            for frame in stackTrace {
-                Log.tracing.error("\(prefix)    \(frame)\(reset)")
-            }
-        }
+        Log.tracing.error("\(prefix)  Error: \(TraceEventPublicLogSanitizer.errorSummary(for: error))\(reset)")
     }
 
     /// Prints metadata with proper formatting.
@@ -316,7 +304,7 @@ package actor PrettyConsoleTracer: Tracer {
 
         // Print metadata if not empty
         if !event.metadata.isEmpty {
-            printMetadata(event.metadata)
+            printMetadata(TraceEventPublicLogSanitizer.metadata(for: event))
         }
 
         // Add blank line for visual separation
@@ -364,7 +352,7 @@ package actor PrettyConsoleTracer: Tracer {
         parts.append(kindIndicator)
 
         // Add message
-        parts.append(event.message)
+        parts.append(TraceEventPublicLogSanitizer.message(for: event))
 
         Log.tracing.info("\(parts.joined(separator: " "))")
     }
@@ -505,19 +493,7 @@ package actor PrettyConsoleTracer: Tracer {
         let reset = colorized ? "\u{001B}[0m" : ""
 
         Log.tracing.error("\(prefix)  ❌ Error Details:\(reset)")
-        Log.tracing.error("\(prefix)    🏷️  Type: \(error.type)\(reset)")
-        Log.tracing.error("\(prefix)    💬 Message: \(error.message)\(reset)")
-
-        if let underlyingError = error.underlyingError {
-            Log.tracing.error("\(prefix)    ⚡ Underlying: \(underlyingError)\(reset)")
-        }
-
-        if let stackTrace = error.stackTrace {
-            Log.tracing.error("\(prefix)    📚 Stack Trace:\(reset)")
-            for frame in stackTrace {
-                Log.tracing.error("\(prefix)      • \(frame)\(reset)")
-            }
-        }
+        Log.tracing.error("\(prefix)    🏷️  \(TraceEventPublicLogSanitizer.errorSummary(for: error))\(reset)")
     }
 
     /// Prints metadata with emoji formatting.

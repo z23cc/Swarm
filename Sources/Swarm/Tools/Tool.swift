@@ -509,6 +509,13 @@ private enum ToolArgumentProcessor {
         path: String,
         depth: Int = 0
     ) throws {
+        guard depth < maxDepth else {
+            throw AgentError.invalidToolArguments(
+                toolName: toolName,
+                reason: "Maximum nesting depth (\(maxDepth)) exceeded at path: \(path)"
+            )
+        }
+
         switch expected {
         case .any:
             return
@@ -584,6 +591,13 @@ private enum ToolArgumentProcessor {
         path: String,
         depth: Int = 0
     ) throws -> SendableValue {
+        guard depth < maxDepth else {
+            throw AgentError.invalidToolArguments(
+                toolName: toolName,
+                reason: "Maximum nesting depth (\(maxDepth)) exceeded at path: \(path)"
+            )
+        }
+
         switch expected {
         case .any:
             return value

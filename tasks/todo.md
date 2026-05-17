@@ -22,8 +22,8 @@ Scope: docs/release/example/Linux cluster only: `SWARM-AUDIT-048`, `049`, `050`,
 ## Verification Plan
 
 - [x] Run targeted docs/release/example/Linux commands as practical.
-- [ ] Run `git diff --check`.
-- [ ] Push branch and open PR against `codex/fix-mcp-text-content-tests` with `gh --repo christopherkarani/Swarm`.
+- [x] Run `git diff --check`.
+- [x] Push branch and open PR against `codex/fix-mcp-text-content-tests` with `gh --repo christopherkarani/Swarm`.
 
 ## Review Results
 
@@ -33,3 +33,8 @@ Scope: docs/release/example/Linux cluster only: `SWARM-AUDIT-048`, `049`, `050`,
 - `SWARM_CORE_ONLY=1 swift test --package-path Examples/CodeReviewer` passed.
 - `CONDUIT_SKIP_MLX_DEPS=1 swift build --target Swarm` passed.
 - `scripts/ci/verify-linux-core.sh` passed for `Swarm` and `SwarmMCP`.
+
+## Merge Resolution
+
+- Resolved against the updated `codex/fix-mcp-text-content-tests` base after PRs #95-#103 merged.
+- Kept the core-only dependency gate from this PR and carried forward the newer Conduit `0.3.16` pin from the merged base.
