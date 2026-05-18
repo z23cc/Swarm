@@ -32,4 +32,15 @@ struct AgentResultRuntimeEngineTests {
         )
         #expect(result.runtimeEngine == nil)
     }
+
+    @Test("native Agent.run records native runtime engine")
+    func nativeAgentRunRecordsNativeRuntimeEngine() async throws {
+        let provider = MockInferenceProvider(responses: ["hi"])
+        let agent = try Agent(instructions: "Reply shortly.", inferenceProvider: provider)
+
+        let result = try await agent.run("hello")
+
+        #expect(result.output == "hi")
+        #expect(result.runtimeEngine == "native")
+    }
 }

@@ -51,6 +51,18 @@ public actor ContextCoreMemory: Memory, MemoryPromptDescriptor, MemorySessionLif
     }
 
     public init(configuration: ContextCoreMemoryConfiguration = .default) throws {
+        try self.init(
+            configuration: configuration,
+            endSession: { context in
+                try await context.endSession()
+            }
+        )
+    }
+
+    init(
+        configuration: ContextCoreMemoryConfiguration = .default,
+        endSession: @escaping @Sendable (ContextCore.AgentContext) async throws -> Void
+    ) throws {
         self.configuration = configuration
         self.memoryPromptTitle = configuration.promptTitle
         self.memoryPromptGuidance = configuration.promptGuidance
@@ -59,6 +71,7 @@ public actor ContextCoreMemory: Memory, MemoryPromptDescriptor, MemorySessionLif
             try ContextCore.AgentContext(configuration: configuration.contextConfiguration)
         }
         self.context = try contextFactory()
+        self.endSession = endSession
     }
 
     public func add(_ message: MemoryMessage) async {
@@ -91,6 +104,14 @@ public actor ContextCoreMemory: Memory, MemoryPromptDescriptor, MemorySessionLif
     }
 
     public func clear() async {
+        if sessionIsReady {
+            do {
+                try await endSession(context)
+            } catch {
+                // Best-effort shutdown. Clearing Swarm's local buffer remains authoritative.
+            }
+        }
+
         messages.removeAll()
         sessionIsReady = false
     }
@@ -105,7 +126,7 @@ public actor ContextCoreMemory: Memory, MemoryPromptDescriptor, MemorySessionLif
         }
 
         do {
-            try await context.endSession()
+            try await endSession(context)
         } catch {
             // Best-effort shutdown. The local buffer stays authoritative.
         }
@@ -122,6 +143,7 @@ public actor ContextCoreMemory: Memory, MemoryPromptDescriptor, MemorySessionLif
 
     private let configuration: ContextCoreMemoryConfiguration
     private let contextFactory: @Sendable () throws -> ContextCore.AgentContext
+    private let endSession: @Sendable (ContextCore.AgentContext) async throws -> Void
     private var context: ContextCore.AgentContext
     private var sessionIsReady = false
     private var messages: [MemoryMessage] = []

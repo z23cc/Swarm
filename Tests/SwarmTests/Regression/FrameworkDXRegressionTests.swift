@@ -180,13 +180,25 @@ struct FrameworkDXRegressionTests {
     @Test("Workflow timeout returns without waiting for non-cooperative work")
     func workflowTimeoutReturnsWithoutWaitingForNonCooperativeWork() async throws {
         let agent = BlockingWorkflowAgent()
+        let timeout: Duration = .milliseconds(200)
         let start = ContinuousClock.now
 
-        await #expect(throws: AgentError.self) {
-            _ = try await Workflow()
+        let task = Task {
+            try await Workflow()
                 .step(agent)
-                .timeout(.milliseconds(50))
+                .timeout(timeout)
                 .run("input")
+        }
+
+        await agent.waitUntilBlocked()
+
+        do {
+            _ = try await task.value
+            Issue.record("Expected workflow timeout")
+        } catch AgentError.timeout(let duration) {
+            #expect(duration == timeout)
+        } catch {
+            Issue.record("Expected workflow timeout, got \(error)")
         }
 
         let elapsed = ContinuousClock.now - start
@@ -436,10 +448,27 @@ private actor BlockingWorkflowAgent: AgentRuntime {
     nonisolated let instructions = "Block until released."
     nonisolated let configuration = AgentConfiguration.default
     private var continuation: CheckedContinuation<Void, Never>?
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+
+    var isBlocked: Bool {
+        continuation != nil
+    }
+
+    func waitUntilBlocked() async {
+        if continuation != nil {
+            return
+        }
+        await withCheckedContinuation { waiter in
+            blockedWaiters.append(waiter)
+        }
+    }
 
     func run(_ input: String, session _: (any Session)?, observer _: (any AgentObserver)?) async throws -> AgentResult {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
+            let waiters = blockedWaiters
+            blockedWaiters.removeAll()
+            waiters.forEach { $0.resume() }
         }
         return AgentResult(output: input)
     }

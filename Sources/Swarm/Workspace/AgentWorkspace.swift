@@ -76,13 +76,21 @@ public struct AgentWorkspace: Sendable {
             do {
                 let spec = try parseAgentSpec(at: specURL)
                 for skillID in spec.skills {
-                    let skillURL = skillsDirectory.appendingPathComponent(skillID, isDirectory: true).appendingPathComponent("SKILL.md")
+                    let skillURL: URL
                     do {
+                        let safeSkillID = try validatedPathComponent(
+                            skillID,
+                            field: "skills",
+                            path: relativePath(for: specURL)
+                        )
+                        skillURL = skillsDirectory
+                            .appendingPathComponent(safeSkillID, isDirectory: true)
+                            .appendingPathComponent("SKILL.md")
                         _ = try parseSkill(at: skillURL)
                     } catch {
                         issues.append(
                             WorkspaceValidationIssue(
-                                path: relativePath(for: skillURL),
+                                path: relativePath(for: specURL),
                                 message: error.localizedDescription
                             )
                         )
@@ -151,13 +159,19 @@ extension AgentWorkspace {
     }
 
     func loadAgentSpec(id: String) throws -> WorkspaceAgentSpec {
+        let id = try validatedPathComponent(id, field: "id", path: relativePath(for: agentsDirectory))
         let specURL = agentsDirectory.appendingPathComponent("\(id).md")
         return try parseAgentSpec(at: specURL)
     }
 
     func loadSkills(named names: [String]) throws -> [WorkspaceSkill] {
         try names.map { name in
-            try parseSkill(at: skillsDirectory.appendingPathComponent(name, isDirectory: true).appendingPathComponent("SKILL.md"))
+            let name = try validatedPathComponent(name, field: "name", path: relativePath(for: skillsDirectory))
+            return try parseSkill(
+                at: skillsDirectory
+                    .appendingPathComponent(name, isDirectory: true)
+                    .appendingPathComponent("SKILL.md")
+            )
         }
     }
 
@@ -309,6 +323,15 @@ extension AgentWorkspace {
         }
 
         let id = try document.requiredString("id", path: relativePath(for: url))
+        _ = try validatedPathComponent(id, field: "id", path: relativePath(for: url))
+        let expectedID = url.deletingPathExtension().lastPathComponent
+        guard id == expectedID else {
+            throw AgentWorkspaceError.invalidField(
+                path: relativePath(for: url),
+                field: "id",
+                reason: "must match file name '\(expectedID)'"
+            )
+        }
         let title = try document.requiredString("title", path: relativePath(for: url))
         _ = try document.requiredInt("revision", path: relativePath(for: url))
         _ = try document.requiredString("updated_at", path: relativePath(for: url))
@@ -346,6 +369,7 @@ extension AgentWorkspace {
         }
 
         let name = try document.requiredString("name", path: relativePath(for: url))
+        _ = try validatedPathComponent(name, field: "name", path: relativePath(for: url))
         let description = try document.requiredString("description", path: relativePath(for: url))
         let directoryName = url.deletingLastPathComponent().lastPathComponent
         guard name == directoryName else {
@@ -454,6 +478,24 @@ extension AgentWorkspace {
             return suffix.isEmpty ? "." : String(suffix.drop(while: { $0 == "/" }))
         }
         return url.path
+    }
+
+    private func validatedPathComponent(_ value: String, field: String, path: String) throws -> String {
+        guard value.trimmingCharacters(in: .whitespacesAndNewlines) == value,
+              !value.isEmpty,
+              value != ".",
+              value != "..",
+              !value.contains("/"),
+              !value.contains("\\")
+        else {
+            throw AgentWorkspaceError.invalidField(
+                path: path,
+                field: field,
+                reason: "must be a single path component"
+            )
+        }
+
+        return value
     }
 
     private func remap(error: AgentWorkspaceError, to path: String) -> AgentWorkspaceError {

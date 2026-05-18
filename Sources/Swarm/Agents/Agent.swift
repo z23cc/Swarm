@@ -21,8 +21,8 @@ import Foundation
 /// 1. Apple Foundation Models when `inferencePolicy.privacyRequired` is true
 /// 2. An explicit provider passed to `Agent(...)` (including `Agent(_:)`)
 /// 3. A provider set via `.environment(\.inferenceProvider, ...)`
-/// 4. `Swarm.defaultProvider` (set via `Swarm.configure(provider:)`)
-/// 5. `Swarm.cloudProvider` (set via `Swarm.configure(cloudProvider:)`, when tool calling is required)
+/// 4. `Swarm.cloudProvider` (set via `Swarm.configure(cloudProvider:)`, when tool calling is required)
+/// 5. `Swarm.defaultProvider` (set via `Swarm.configure(provider:)`)
 /// 6. Apple Foundation Models (on-device), if available, including prompt-based tool emulation
 /// 7. Otherwise, throw `AgentError.inferenceProviderUnavailable`
 ///
@@ -131,8 +131,8 @@ public struct Agent: AgentRuntime, Sendable {
     /// 1. Apple Foundation Models when `configuration.inferencePolicy.privacyRequired` is true
     /// 2. Explicit provider passed to ``Agent`` initialization
     /// 3. Provider set via `.environment(\.inferenceProvider, ...)`
-    /// 4. ``Swarm/defaultProvider`` (configured via `Swarm.configure(provider:)`)
-    /// 5. ``Swarm/cloudProvider`` (configured via `Swarm.configure(cloudProvider:)`)
+    /// 4. ``Swarm/cloudProvider`` (configured via `Swarm.configure(cloudProvider:)`, when tool calling is required)
+    /// 5. ``Swarm/defaultProvider`` (configured via `Swarm.configure(provider:)`)
     /// 6. Apple Foundation Models (on-device), if available
     /// 7. Throws ``AgentError/inferenceProviderUnavailable``
     ///
@@ -942,7 +942,7 @@ public struct Agent: AgentRuntime, Sendable {
             // Session remains the transcript source of truth. When no session is supplied,
             // the default memory keeps user/assistant turns available for subsequent runs.
 
-            _ = resultBuilder.setMetadata(RuntimeMetadata.runtimeEngineKey, .string(RuntimeMetadata.graphRuntimeEngineName))
+            _ = resultBuilder.setMetadata(RuntimeMetadata.runtimeEngineKey, .string(RuntimeMetadata.nativeRuntimeEngineName))
             let result = resultBuilder.build()
             if configuration.autoPreviousResponseId, let session {
                 let response = makeResponse(from: result, responseID: responseID)
@@ -992,16 +992,16 @@ public struct Agent: AgentRuntime, Sendable {
             return transformedInferenceProvider(environmentProvider)
         }
 
-        // 3. Swarm.defaultProvider (global)
-        if let globalProvider = await Swarm.defaultProvider {
-            return transformedInferenceProvider(globalProvider)
-        }
-
-        // 4. Swarm.cloudProvider (if tool calling is required)
+        // 3. Swarm.cloudProvider (if tool calling is required)
         let hasEnabledTools = await !toolRegistry.schemas.isEmpty
         let needsToolCallingProvider = hasEnabledTools || !_handoffs.isEmpty
         if needsToolCallingProvider, let cloudProvider = await Swarm.cloudProvider {
             return transformedInferenceProvider(cloudProvider)
+        }
+
+        // 4. Swarm.defaultProvider (global)
+        if let globalProvider = await Swarm.defaultProvider {
+            return transformedInferenceProvider(globalProvider)
         }
 
         // 5. Foundation Models (if available, on Apple platform)
@@ -1141,6 +1141,7 @@ public struct Agent: AgentRuntime, Sendable {
     }
 
     static func makeDefaultMemory() throws -> any Memory {
+        #if SWARM_INTEGRATIONS
         if SwarmRuntimeEnvironment.isRunningTests {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("SwarmDefaultMemoryTests", isDirectory: true)
@@ -1151,10 +1152,14 @@ public struct Agent: AgentRuntime, Sendable {
             ))
         }
         return try DefaultAgentMemory()
+        #else
+        return SlidingWindowMemory()
+        #endif
     }
 
     private func resolvedToolRegistry() async throws -> ToolRegistry {
         let baseTools = await toolRegistry.allTools
+        #if SWARM_INTEGRATIONS
         guard !baseTools.contains(where: { $0.name == "websearch" }) else {
             return try ToolRegistry(tools: baseTools)
         }
@@ -1170,6 +1175,9 @@ public struct Agent: AgentRuntime, Sendable {
         var tools = baseTools
         tools.append(WebSearchTool(configuration: ambientWeb))
         return try ToolRegistry(tools: tools)
+        #else
+        return try ToolRegistry(tools: baseTools)
+        #endif
     }
 
     private func resolvedInferenceOptions(
@@ -1330,11 +1338,16 @@ public struct Agent: AgentRuntime, Sendable {
         )
         var transcriptMessages: [MemoryMessage] = []
         let systemMessage = buildSystemMessage(memory: activeMemory, memoryContext: memoryContext)
+        let executionContext = AgentContext(input: input)
+        await executionContext.recordExecution(agentName: name)
 
         let enableStreaming = configuration.enableStreaming && observer != nil
+        let capabilities = providerCapabilities(for: provider)
         let structuredToolStreamingProvider = provider as? any ToolCallStreamingConversationInferenceProvider
         let promptToolStreamingProvider = provider as? any ToolCallStreamingInferenceProvider
-        let useToolStreaming = enableStreaming && (structuredToolStreamingProvider != nil || promptToolStreamingProvider != nil)
+        let useToolStreaming = enableStreaming
+            && capabilities.contains(.streamingToolCalls)
+            && (structuredToolStreamingProvider != nil || promptToolStreamingProvider != nil)
         let membraneAdapter = resolvedMembraneAdapter()
 
         while iteration < configuration.maxIterations {
@@ -1361,11 +1374,13 @@ public struct Agent: AgentRuntime, Sendable {
                         query = input
                     }
                     var windowedContext = ""
+                    #if SWARM_INTEGRATIONS
                     if let defaultMem = activeMemory as? DefaultAgentMemory {
                         windowedContext = await defaultMem.context(for: query, tokenLimit: historyBudget)
                     } else if let ccMemory = activeMemory as? ContextCoreMemory {
                         windowedContext = await ccMemory.context(for: query, tokenLimit: historyBudget)
                     }
+                    #endif
                     if !windowedContext.isEmpty {
                         let livePrompt = buildPrompt(from: conversationHistory)
                         rawPrompt = """
@@ -1420,7 +1435,10 @@ public struct Agent: AgentRuntime, Sendable {
                 } else {
                     rawPrompt = buildPrompt(from: conversationHistory)
                 }
-                let unplannedSchemas = await buildToolSchemasWithHandoffs(toolRegistry: toolRegistry)
+                let unplannedSchemas = await buildToolSchemasWithHandoffs(
+                    toolRegistry: toolRegistry,
+                    context: executionContext
+                )
                 var plannedPrompt = rawPrompt
                 var plannedSchemas = MembraneInternalTools.sortedSchemas(unplannedSchemas)
 
@@ -1534,6 +1552,7 @@ public struct Agent: AgentRuntime, Sendable {
                         observer: observer,
                         tracing: tracing,
                         membraneAdapter: membraneAdapter,
+                        context: executionContext,
                         startTime: startTime
                     )
                     // If a handoff occurred, return the target agent's result
@@ -2034,10 +2053,13 @@ public struct Agent: AgentRuntime, Sendable {
     ///
     /// This merges regular tool schemas with handoff-generated schemas,
     /// allowing handoffs to appear as callable tools in the LLM prompt.
-    private func buildToolSchemasWithHandoffs(toolRegistry: ToolRegistry) async -> [ToolSchema] {
+    private func buildToolSchemasWithHandoffs(
+        toolRegistry: ToolRegistry,
+        context: AgentContext
+    ) async -> [ToolSchema] {
         var schemas = await toolRegistry.schemas
 
-        for handoff in _handoffs {
+        for handoff in await activeHandoffs(context: context) {
             let handoffSchema = ToolSchema(
                 name: handoff.effectiveToolName,
                 description: handoff.effectiveToolDescription,
@@ -2056,6 +2078,19 @@ public struct Agent: AgentRuntime, Sendable {
         return MembraneInternalTools.sortedSchemas(schemas)
     }
 
+    private func activeHandoffs(context: AgentContext) async -> [AnyHandoffConfiguration] {
+        var active: [AnyHandoffConfiguration] = []
+
+        for handoff in _handoffs {
+            if let when = handoff.when, await !when(context, handoff.targetAgent) {
+                continue
+            }
+            active.append(handoff)
+        }
+
+        return active
+    }
+
     /// Processes tool calls, handling both regular tools and handoff tools.
     ///
     /// When a tool call matches a handoff's `effectiveToolName`, the target agent
@@ -2070,6 +2105,7 @@ public struct Agent: AgentRuntime, Sendable {
         observer: (any AgentObserver)?,
         tracing: TracingHelper?,
         membraneAdapter: (any MembraneAgentAdapter)?,
+        context: AgentContext,
         startTime: ContinuousClock.Instant
     ) async throws -> FinalAssistantResponse? {
         let handoffMap = Dictionary(
@@ -2090,12 +2126,50 @@ public struct Agent: AgentRuntime, Sendable {
         for parsedCall in response.toolCalls {
             // Check if this is a handoff tool call
             if let handoffConfig = handoffMap[parsedCall.name] {
+                if let when = handoffConfig.when, await !when(context, handoffConfig.targetAgent) {
+                    let message = "Handoff is not enabled"
+                    let handoffCall = ToolCall(
+                        providerCallId: parsedCall.id,
+                        toolName: parsedCall.name,
+                        arguments: parsedCall.arguments
+                    )
+                    _ = resultBuilder.addToolCall(handoffCall)
+                    let result = ToolResult.failure(callId: handoffCall.id, error: message, duration: .zero)
+                    _ = resultBuilder.addToolResult(result)
+
+                    if configuration.stopOnToolError {
+                        throw AgentError.toolExecutionFailed(toolName: parsedCall.name, underlyingError: message)
+                    }
+
+                    let toolError = "[TOOL ERROR] Execution failed: \(message). Please try a different approach or tool."
+                    conversationHistory.append(.toolResult(
+                        toolName: parsedCall.name,
+                        result: toolError,
+                        toolCallID: parsedCall.id
+                    ))
+                    transcriptMessages.append(
+                        SwarmTranscriptCodec.encodeMessage(
+                            role: .tool,
+                            content: toolError,
+                            toolName: parsedCall.name,
+                            toolCallID: parsedCall.id
+                        )
+                    )
+                    continue
+                }
+
                 let reason = parsedCall.arguments["reason"]?.stringValue ?? ""
                 let targetAgent = handoffConfig.targetAgent
 
                 let handoffStart = ContinuousClock.now
                 let spanId = await tracing?.traceToolCall(name: parsedCall.name, arguments: parsedCall.arguments)
-                await observer?.onHandoff(context: nil, fromAgent: self, toAgent: targetAgent)
+                let handoffCall = ToolCall(
+                    providerCallId: parsedCall.id,
+                    toolName: parsedCall.name,
+                    arguments: parsedCall.arguments
+                )
+                _ = resultBuilder.addToolCall(handoffCall)
+                await observer?.onHandoff(context: context, fromAgent: self, toAgent: targetAgent)
 
                 // Find the last user message to use as handoff input
                 let lastUserMessage = conversationHistory.last(where: {
@@ -2108,8 +2182,80 @@ public struct Agent: AgentRuntime, Sendable {
                     reason.isEmpty ? "Continue the conversation" : reason
                 }
 
-                let result = try await executeWithinRemainingTimeout(startTime: startTime) {
-                    try await targetAgent.run(handoffInput, session: nil, observer: observer)
+                let initialHandoffData = HandoffInputData(
+                    sourceAgentName: name,
+                    targetAgentName: targetAgent.name,
+                    input: handoffInput,
+                    context: await context.snapshot,
+                    metadata: reason.isEmpty ? [:] : ["reason": .string(reason)]
+                )
+
+                if let onTransfer = handoffConfig.onTransfer {
+                    do {
+                        try await onTransfer(context, initialHandoffData)
+                    } catch {
+                        Log.agents.warning("Handoff onTransfer callback failed for \(parsedCall.name): \(error)")
+                    }
+                }
+
+                let handoffData = HandoffInputData(
+                    sourceAgentName: initialHandoffData.sourceAgentName,
+                    targetAgentName: initialHandoffData.targetAgentName,
+                    input: initialHandoffData.input,
+                    context: await context.snapshot,
+                    metadata: initialHandoffData.metadata
+                )
+                let transformedData = handoffConfig.transform?(handoffData) ?? handoffData
+                let requestContext = transformedData.context.merging(transformedData.metadata) { _, new in new }
+                let handoffContext = await context.copy(additionalValues: requestContext)
+                await applyContextValues(requestContext, to: handoffContext)
+                await preserveExecutionPath(from: context, in: handoffContext)
+                if handoffConfig.nestHandoffHistory {
+                    await addNestedHandoffHistory(
+                        conversationHistory,
+                        to: handoffContext,
+                        skippingToolCallID: parsedCall.id
+                    )
+                }
+
+                let handoffRequest = HandoffRequest(
+                    sourceAgentName: transformedData.sourceAgentName,
+                    targetAgentName: transformedData.targetAgentName,
+                    input: transformedData.input,
+                    reason: reason.isEmpty ? nil : reason,
+                    context: requestContext
+                )
+
+                let result: AgentResult
+                do {
+                    result = try await executeWithinRemainingTimeout(startTime: startTime) {
+                        if let receiver = targetAgent as? any HandoffReceiver {
+                            return try await receiver.handleHandoff(handoffRequest, context: handoffContext)
+                        } else {
+                            let handoffSession = try await makeNestedHandoffSession(
+                                from: handoffContext,
+                                enabled: handoffConfig.nestHandoffHistory
+                            )
+                            return try await targetAgent.run(
+                                transformedData.input,
+                                session: handoffSession,
+                                observer: observer
+                            )
+                        }
+                    }
+                } catch {
+                    let handoffDuration = ContinuousClock.now - handoffStart
+                    _ = resultBuilder.addToolResult(
+                        ToolResult.failure(
+                            callId: handoffCall.id,
+                            error: error.localizedDescription,
+                            duration: handoffDuration
+                        )
+                    )
+                    if let spanId {
+                        await tracing?.traceToolError(spanId: spanId, name: parsedCall.name, error: error)
+                    }
+                    throw error
                 }
                 conversationHistory.append(.toolResult(
                     toolName: parsedCall.name,
@@ -2125,8 +2271,15 @@ public struct Agent: AgentRuntime, Sendable {
                     )
                 )
 
+                let handoffDuration = ContinuousClock.now - handoffStart
+                _ = resultBuilder.addToolResult(
+                    ToolResult.success(
+                        callId: handoffCall.id,
+                        output: .string(result.output),
+                        duration: handoffDuration
+                    )
+                )
                 if let spanId {
-                    let handoffDuration = ContinuousClock.now - handoffStart
                     await tracing?.traceToolResult(spanId: spanId, name: parsedCall.name, result: result.output, duration: handoffDuration)
                 }
 
@@ -2164,6 +2317,79 @@ public struct Agent: AgentRuntime, Sendable {
         }
 
         return nil
+    }
+
+    private func applyContextValues(
+        _ values: [String: SendableValue],
+        to context: AgentContext
+    ) async {
+        for (key, value) in values {
+            await context.set(key, value: value)
+        }
+    }
+
+    private func preserveExecutionPath(from source: AgentContext, in target: AgentContext) async {
+        let executionPath = await source.getExecutionPath()
+        for agentName in executionPath {
+            await target.recordExecution(agentName: agentName)
+        }
+    }
+
+    private func makeNestedHandoffSession(
+        from context: AgentContext,
+        enabled: Bool
+    ) async throws -> (any Session)? {
+        guard enabled else {
+            return nil
+        }
+
+        let messages = await context.getMessages()
+        guard !messages.isEmpty else {
+            return nil
+        }
+
+        let session = InMemorySession()
+        try await session.addItems(messages)
+        return session
+    }
+
+    private func addNestedHandoffHistory(
+        _ conversationHistory: [ConversationMessage],
+        to context: AgentContext,
+        skippingToolCallID skippedToolCallID: String?
+    ) async {
+        for message in conversationHistory {
+            switch message {
+            case let .system(content):
+                await context.addMessage(SwarmTranscriptCodec.encodeMessage(role: .system, content: content))
+            case let .user(content):
+                await context.addMessage(SwarmTranscriptCodec.encodeMessage(role: .user, content: content))
+            case let .assistant(content, toolCalls):
+                let nestedToolCalls = toolCalls.filter { $0.id != skippedToolCallID }
+                guard toolCalls.isEmpty || !nestedToolCalls.isEmpty else {
+                    continue
+                }
+                await context.addMessage(
+                    SwarmTranscriptCodec.encodeMessage(
+                        role: .assistant,
+                        content: content,
+                        toolCalls: nestedToolCalls
+                    )
+                )
+            case let .toolResult(toolName, result, toolCallID):
+                guard toolCallID != skippedToolCallID else {
+                    continue
+                }
+                await context.addMessage(
+                    SwarmTranscriptCodec.encodeMessage(
+                        role: .tool,
+                        content: result,
+                        toolName: toolName,
+                        toolCallID: toolCallID
+                    )
+                )
+            }
+        }
     }
 
     // MARK: - Prompt Building

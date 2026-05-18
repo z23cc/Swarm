@@ -7,6 +7,11 @@
 import Foundation
 @testable import Swarm
 import Testing
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#endif
 
 // MARK: - MockGuardrailAgent
 
@@ -718,6 +723,96 @@ extension GuardrailIntegrationTests {
         let latestStart = max(interval1.start, interval2.start)
         let earliestEnd = min(interval1.end, interval2.end)
         #expect(latestStart < earliestEnd, "Expected parallel guardrail execution; intervals did not overlap.")
+    }
+
+    @Test("Parallel run-all input guardrails return results in input order")
+    func parallelRunAllInputGuardrailsReturnResultsInInputOrder() async throws {
+        let slow = InputGuard("slow_first") { _, _ in
+            try? await Task.sleep(for: .milliseconds(40))
+            return .passed(message: "slow passed")
+        }
+        let fast = InputGuard("fast_second") { _, _ in
+            .passed(message: "fast passed")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(runInParallel: true, stopOnFirstTripwire: false)
+        )
+
+        let results = try await runner.runInputGuardrails([slow, fast], input: "safe", context: nil)
+
+        #expect(results.map(\.guardrailName) == ["slow_first", "fast_second"])
+    }
+
+    @Test("Parallel run-all input guardrails emit all tripwire observer events")
+    func parallelRunAllInputGuardrailsEmitAllTripwireObserverEvents() async throws {
+        let observer = RecordingGuardrailObserver()
+        let slow = InputGuard("slow_blocker") { _, _ in
+            try? await Task.sleep(for: .milliseconds(40))
+            return .tripwire(message: "slow blocked")
+        }
+        let fast = InputGuard("fast_blocker") { _, _ in
+            .tripwire(message: "fast blocked")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(runInParallel: true, stopOnFirstTripwire: false),
+            observer: observer
+        )
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runInputGuardrails([slow, fast], input: "blocked", context: nil)
+        }
+
+        let events = await observer.events
+        #expect(Set(events.map(\.name)) == ["slow_blocker", "fast_blocker"])
+        #expect(events.count == 2)
+    }
+
+    @Test("Input guardrails honor configured timeout")
+    func inputGuardrailsHonorConfiguredTimeout() async throws {
+        let slow = InputGuard("slow_timeout") { _, _ in
+            try await Task.sleep(for: .milliseconds(200))
+            return .passed(message: "too late")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(timeout: .milliseconds(10))
+        )
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runInputGuardrails([slow], input: "safe", context: nil)
+        }
+    }
+
+    @Test("Input guardrail timeout returns before noncooperative operation finishes")
+    func inputGuardrailTimeoutReturnsBeforeNoncooperativeOperationFinishes() async throws {
+        let blocking = InputGuard("blocking_timeout") { _, _ in
+            usleep(1_000_000)
+            return .passed(message: "too late")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(timeout: .milliseconds(20))
+        )
+        let start = ContinuousClock.now
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runInputGuardrails([blocking], input: "safe", context: nil)
+        }
+
+        #expect(start.duration(to: ContinuousClock.now) < .milliseconds(500))
+    }
+
+    @Test("Parallel input guardrails honor configured timeout")
+    func parallelInputGuardrailsHonorConfiguredTimeout() async throws {
+        let slow = InputGuard("parallel_slow_timeout") { _, _ in
+            try await Task.sleep(for: .milliseconds(200))
+            return .passed(message: "too late")
+        }
+        let runner = GuardrailRunner(
+            configuration: GuardrailRunnerConfiguration(runInParallel: true, timeout: .milliseconds(10))
+        )
+
+        await #expect(throws: GuardrailError.self) {
+            _ = try await runner.runInputGuardrails([slow], input: "safe", context: nil)
+        }
     }
 
     @Test("Parallel input guardrail tripwire emits observer event")

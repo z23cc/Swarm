@@ -269,6 +269,87 @@ struct RetryPolicyTests {
         #expect(callbacks[1].0 == 2)
     }
 
+    @Test("Cancellation is propagated without retry")
+    func cancellationIsPropagatedWithoutRetry() async throws {
+        let counter = TestCounter()
+        let retryRecorder = TestRecorder<Int>()
+        let policy = RetryPolicy(
+            maxAttempts: 3,
+            backoff: .immediate,
+            onRetry: { attempt, _ in
+                await retryRecorder.append(attempt)
+            }
+        )
+
+        do {
+            _ = try await policy.execute {
+                _ = await counter.increment()
+                throw CancellationError()
+            }
+            Issue.record("Expected CancellationError")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            Issue.record("Expected CancellationError, got \(error)")
+        }
+
+        #expect(await counter.get() == 1)
+        #expect(await retryRecorder.getAll().isEmpty)
+    }
+
+    @Test("Huge finite retry delays clamp instead of trapping")
+    func hugeFiniteRetryDelaysClampInsteadOfTrapping() async throws {
+        let counter = TestCounter()
+        let policy = RetryPolicy(
+            maxAttempts: 1,
+            backoff: .exponential(base: 1.0e20, multiplier: 2.0, maxDelay: 1.0e20)
+        )
+
+        let task = Task<String, Error> {
+            try await policy.execute {
+                _ = await counter.increment()
+                throw TestError.transient
+            }
+        }
+
+        while await counter.get() == 0 {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        try await Task.sleep(for: .milliseconds(5))
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            Issue.record("Expected CancellationError")
+        } catch is CancellationError {
+            // Expected after the oversized delay is clamped and sleep is cancelled.
+        } catch {
+            Issue.record("Expected CancellationError, got \(error)")
+        }
+
+        #expect(await counter.get() == 1)
+    }
+
+    @Test("Small finite retry delay still retries")
+    func smallFiniteRetryDelayStillRetries() async throws {
+        let counter = TestCounter()
+        let policy = RetryPolicy(
+            maxAttempts: 1,
+            backoff: .immediate
+        )
+
+        let result = try await policy.execute {
+            let attempt = await counter.increment()
+            if attempt == 1 {
+                throw TestError.transient
+            }
+            return "recovered"
+        }
+
+        #expect(result == "recovered")
+        #expect(await counter.get() == 2)
+    }
+
     // MARK: - Static Convenience Tests
 
     @Test("Static noRetry policy fails immediately")

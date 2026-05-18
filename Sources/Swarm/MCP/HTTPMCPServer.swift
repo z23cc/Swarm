@@ -113,6 +113,7 @@ public actor HTTPMCPServer: MCPServer {
     public func initialize() async throws -> MCPCapabilities {
         let params: [String: SendableValue] = [
             "protocolVersion": .string("2024-11-05"),
+            "capabilities": .dictionary([:]),
             "clientInfo": .dictionary([
                 "name": .string("Swarm"),
                 "version": .string("1.0.0")
@@ -131,6 +132,7 @@ public actor HTTPMCPServer: MCPServer {
         }
 
         let capabilities = try parseCapabilities(from: result)
+        try await sendNotification(try MCPNotification(method: "notifications/initialized"))
         cachedCapabilities = capabilities
         return capabilities
     }
@@ -178,6 +180,7 @@ public actor HTTPMCPServer: MCPServer {
             throw MCPError.internalError("No result in tools/call response")
         }
 
+        try validateToolCallResult(result, toolName: name)
         return result
     }
 
@@ -299,11 +302,30 @@ public actor HTTPMCPServer: MCPServer {
     /// - Returns: The MCP response from the server.
     /// - Throws: `MCPError` if all retry attempts fail.
     private func sendRequest(_ mcpRequest: MCPRequest) async throws -> MCPResponse {
+        try await sendWithRetry {
+            try await self.performRequest(mcpRequest)
+        }
+    }
+
+    /// Sends an MCP notification with retry logic.
+    ///
+    /// Notifications are JSON-RPC messages without an `id`; successful HTTP responses
+    /// do not need to contain a JSON-RPC body.
+    ///
+    /// - Parameter notification: The MCP notification to send.
+    /// - Throws: `MCPError` if all retry attempts fail.
+    private func sendNotification(_ notification: MCPNotification) async throws {
+        try await sendWithRetry {
+            try await self.performNotification(notification)
+        }
+    }
+
+    private func sendWithRetry<T>(_ operation: () async throws -> T) async throws -> T {
         var lastError: Error?
 
         for attempt in 0..<(maxRetries + 1) {
             do {
-                return try await performRequest(mcpRequest)
+                return try await operation()
             } catch let error as MCPError {
                 lastError = error
 
@@ -394,6 +416,40 @@ public actor HTTPMCPServer: MCPServer {
         return try decoder.decode(MCPResponse.self, from: data)
     }
 
+    /// Performs a single HTTP notification request to the MCP server.
+    ///
+    /// - Parameter notification: The JSON-RPC notification to send.
+    /// - Throws: `MCPError` if the request fails.
+    private func performNotification(_ notification: MCPNotification) async throws {
+        var urlRequest = URLRequest(url: baseURL)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.timeoutInterval = timeout
+
+        if let apiKey {
+            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        urlRequest.httpBody = try encoder.encode(notification)
+
+        let (data, response) = try await session.data(for: urlRequest)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw MCPError.internalError("Invalid response type")
+        }
+
+        let statusCode = httpResponse.statusCode
+        guard (200 ... 299).contains(statusCode) else {
+            let errorMessage = if let bodyString = String(data: data, encoding: .utf8), !bodyString.isEmpty {
+                "HTTP \(statusCode): \(bodyString)"
+            } else {
+                "HTTP \(statusCode)"
+            }
+
+            throw MCPError(code: statusCode, message: errorMessage)
+        }
+    }
+
     // MARK: - Parsing Helpers
 
     /// Parses capabilities from an initialize response.
@@ -454,8 +510,15 @@ public actor HTTPMCPServer: MCPServer {
     /// - Parameter schema: The inputSchema value.
     /// - Returns: An array of ToolParameter objects.
     private func parseParameters(from schema: SendableValue?) -> [ToolParameter] {
-        guard let schemaDict = schema?.dictionaryValue,
-              let properties = schemaDict["properties"]?.dictionaryValue else {
+        guard let schemaDict = schema?.dictionaryValue else {
+            return []
+        }
+
+        return parseObjectProperties(from: schemaDict)
+    }
+
+    private func parseObjectProperties(from schemaDict: [String: SendableValue]) -> [ToolParameter] {
+        guard let properties = schemaDict["properties"]?.dictionaryValue else {
             return []
         }
 
@@ -466,35 +529,83 @@ public actor HTTPMCPServer: MCPServer {
             guard let propDict = propValue.dictionaryValue else { continue }
 
             let description = extractString(propDict["description"]) ?? ""
-            let typeString = extractString(propDict["type"]) ?? "any"
-            let paramType = mapParameterType(typeString)
+            let paramType = parseParameterType(from: propDict)
             let isRequired = requiredSet.contains(name)
 
             parameters.append(ToolParameter(
                 name: name,
                 description: description,
                 type: paramType,
-                isRequired: isRequired
+                isRequired: isRequired,
+                defaultValue: propDict["default"]
             ))
         }
 
         return parameters
     }
 
-    /// Maps a JSON Schema type string to a ToolParameter.ParameterType.
+    /// Maps a JSON Schema node to a ToolParameter.ParameterType.
     ///
-    /// - Parameter typeString: The JSON Schema type string.
+    /// - Parameter schemaDict: The JSON Schema node dictionary.
     /// - Returns: The corresponding ParameterType.
-    private func mapParameterType(_ typeString: String) -> ToolParameter.ParameterType {
-        switch typeString.lowercased() {
-        case "string": .string
-        case "integer": .int
-        case "number": .double
-        case "boolean": .bool
-        case "array": .array(elementType: .any)
-        case "object": .object(properties: [])
-        default: .any
+    private func parseParameterType(from schemaDict: [String: SendableValue]) -> ToolParameter.ParameterType {
+        if let options = parseStringOptions(from: schemaDict), !options.isEmpty {
+            return .oneOf(options)
         }
+
+        let typeString = extractString(schemaDict["type"]) ?? inferredTypeString(from: schemaDict)
+
+        switch typeString.lowercased() {
+        case "string":
+            return .string
+        case "integer":
+            return .int
+        case "number":
+            return .double
+        case "boolean":
+            return .bool
+        case "array":
+            if let itemsDict = schemaDict["items"]?.dictionaryValue {
+                return .array(elementType: parseParameterType(from: itemsDict))
+            } else {
+                return .array(elementType: .any)
+            }
+        case "object":
+            return .object(properties: parseObjectProperties(from: schemaDict))
+        default:
+            return .any
+        }
+    }
+
+    private func inferredTypeString(from schemaDict: [String: SendableValue]) -> String {
+        if schemaDict["properties"]?.dictionaryValue != nil {
+            return "object"
+        }
+        if schemaDict["items"]?.dictionaryValue != nil {
+            return "array"
+        }
+        return "any"
+    }
+
+    private func parseStringOptions(from schemaDict: [String: SendableValue]) -> [String]? {
+        if let values = schemaDict["enum"]?.arrayValue?.compactMap(\.stringValue), !values.isEmpty {
+            return values
+        }
+
+        guard let oneOf = schemaDict["oneOf"]?.arrayValue else {
+            return nil
+        }
+
+        let values = oneOf.flatMap { option -> [String] in
+            guard let optionDict = option.dictionaryValue else {
+                return []
+            }
+            if let constValue = optionDict["const"]?.stringValue {
+                return [constValue]
+            }
+            return optionDict["enum"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        }
+        return values.isEmpty ? nil : values
     }
 
     /// Parses resources from a resources/list response.
@@ -557,11 +668,62 @@ public actor HTTPMCPServer: MCPServer {
         )
     }
 
+    private func validateToolCallResult(_ result: SendableValue, toolName: String) throws {
+        guard let resultDict = result.dictionaryValue,
+              resultDict["isError"]?.boolValue == true else {
+            return
+        }
+
+        let detail = toolCallErrorMessage(from: resultDict)
+        throw MCPError(
+            code: MCPError.internalErrorCode,
+            message: "Remote MCP tool '\(toolName)' failed: \(detail)",
+            data: result
+        )
+    }
+
+    private func toolCallErrorMessage(from resultDict: [String: SendableValue]) -> String {
+        guard let content = resultDict["content"]?.arrayValue else {
+            return "tool returned isError"
+        }
+
+        let textParts = content.compactMap { item -> String? in
+            guard let itemDict = item.dictionaryValue else {
+                return nil
+            }
+            return itemDict["text"]?.stringValue
+        }
+
+        return textParts.isEmpty ? "tool returned isError" : textParts.joined(separator: "\n")
+    }
+
     /// Extracts a string from a SendableValue.
     ///
     /// - Parameter value: The value to extract from.
     /// - Returns: The string value, or nil if not a string.
     private func extractString(_ value: SendableValue?) -> String? {
         value?.stringValue
+    }
+}
+
+private struct MCPNotification: Sendable, Encodable, Equatable {
+    let jsonrpc: String
+    let method: String
+    let params: [String: SendableValue]?
+
+    init(method: String, params: [String: SendableValue]? = nil) throws {
+        guard !method.isEmpty else {
+            throw MCPError.invalidRequest("MCPNotification: method must be non-empty per JSON-RPC 2.0")
+        }
+
+        jsonrpc = "2.0"
+        self.method = method
+        self.params = params
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case jsonrpc
+        case method
+        case params
     }
 }

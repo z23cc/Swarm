@@ -25,7 +25,11 @@ actor CompositeMemory: Memory, MemoryPromptDescriptor, MemorySessionLifecycle, M
         self.memoryPromptGuidance = memoryPromptGuidance
         self.memoryPriority = memoryPriority
         self.tokenEstimator = tokenEstimator
+        #if SWARM_INTEGRATIONS
         self.trackedSessionMemory = trackedSessionMemory ?? memories.first { $0 is DefaultAgentMemory }
+        #else
+        self.trackedSessionMemory = trackedSessionMemory
+        #endif
         self.allowsAutomaticSessionSeeding = memories.contains(where: Self.allowsSessionSeeding)
     }
 
