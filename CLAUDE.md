@@ -31,7 +31,7 @@ The package uses Swift 6.2 with `StrictConcurrency` enabled across all targets.
 
 ```
 Swarm/
-├── Package.swift                  # SPM manifest (Swift 6.2, traits, products)
+├── Package.swift                  # SPM manifest (Swift 6.2, products)
 ├── README.md                      # User-facing overview
 ├── Sources/
 │   ├── Swarm/                     # Main library (156 .swift files)
@@ -63,7 +63,7 @@ Swarm/
 ├── Tests/
 │   ├── SwarmTests/                # Main test target (mirrors Sources/Swarm)
 │   │   └── Mocks/                 # MockAgentRuntime, MockInferenceProvider, …
-│   ├── HiveSwarmTests/            # Hive integration tests (gated)
+│   ├── HiveSwarmTests/            # Hive integration tests
 │   ├── SwarmMacrosTests/          # Macro expansion tests
 │   └── SwarmCapabilityShowcaseTests/
 ├── Examples/CodeReviewer/         # Standalone example SPM project
@@ -88,16 +88,12 @@ swift test --no-parallel      # Match CI ordering (recommended)
 swift test --filter SwarmTests.WorkflowTests   # Run a single suite
 ```
 
-CI (`.github/workflows/swift.yml`) runs on macOS 15 and Ubuntu with Swift 6.2
-and uses these env vars:
+CI (`.github/workflows/swift.yml`) runs on macOS 15 and Ubuntu with Swift 6.2.
+The default Swarm graph includes Hive, so Linux CI explicitly builds and runs
+the `HiveSwarmTests` target without opt-in traits or environment flags.
 
-```bash
-SWARM_HIVE_RUNTIME=1 SWARM_INCLUDE_HIVE=1 swift test --no-parallel
-```
-
-The Hive integration tests live in the `HiveSwarmTests` target. The
-`orchestrationRequireHiveFailClosed` test is asserted explicitly in CI as a
-fail-closed contract.
+The Hive integration tests live in the `HiveSwarmTests` target and are asserted
+explicitly in CI on both macOS and Linux.
 
 ### Demo / benchmark executables
 
@@ -247,7 +243,8 @@ The `.gitignore` deliberately excludes a number of paths AI assistants might
 otherwise want to create or check in. **Do not work around these.**
 
 - `.claude/`, `.mcp.json`, `.agent_context.md`, `AGENTS.md` — local AI tooling
-  config.
+  config, except `AGENTS.md`, which is intentionally tracked as the repo-level
+  guardrail for future agents.
 - `.swift-version` — contributors keep this locally; CI selects Swift through
   the workflow environment.
 - `Package.resolved` — library, not application.
@@ -256,6 +253,11 @@ otherwise want to create or check in. **Do not work around these.**
   `HIVE_EXTENSIBILITY_INTEGRATION_PLAN.md`, `PRODUCTION_READINESS_AUDIT.md` —
   internal planning artifacts.
 - `marketing/`, `website/`, VitePress build output.
+- `docs/reference/*audit-report.md`, `docs/reference/documentation-*-report.md`,
+  `docs/reference/documentation-improvement-plan.md`,
+  `docs/reference/api-quality-assessment.md`,
+  `docs/reference/twitter-article-*.md`, `docs/swarm-hacker-news-blog.md`,
+  `docs/superpowers/` — internal audit, planning, and marketing artifacts.
 
 `CLAUDE.md` itself was previously git-ignored; it has been intentionally
 un-ignored so this guidance can live in-repo.
@@ -263,9 +265,9 @@ un-ignored so this guidance can live in-repo.
 ## Public API Stability
 
 The framework is at `0.5.1` (`Sources/Swarm/Swarm.swift`) and treats its public
-surface as semi-stable. The audit documents in `docs/reference/` (especially
-`api-catalog.md`, `front-facing-api.md`, and `docc-audit-report.md`) define the
-sanctioned surface. Prefer:
+surface as semi-stable. The supported public reference documents are
+`docs/reference/api-catalog.md`, `docs/reference/front-facing-api.md`, and
+`docs/reference/overview.md`. Prefer:
 
 - adding new types over breaking existing ones,
 - adding new initializer overloads over changing parameter labels on existing

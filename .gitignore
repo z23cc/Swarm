@@ -20,7 +20,6 @@ coverage/
 .claude/
 .mcp.json
 .agent_context.md
-AGENTS.md
 
 # Internal development artifacts
 IMPLEMENTATION_PLAN.md
@@ -59,7 +58,17 @@ website/
 docs/reference/api-surface-catalog.md
 docs/reference/api-improvement-report.md
 docs/reference/api-quality-assessment.md
+docs/reference/*audit-report.md
+docs/reference/docc-audit-report.md
+docs/reference/docs-folder-audit-report.md
+docs/reference/documentation-*-report.md
+docs/reference/documentation-gap-report.md
+docs/reference/documentation-improvement-plan.md
+docs/reference/documentation-validation-report.md
 docs/reference/readme-audit-report.md
+docs/reference/twitter-article-*.md
+docs/swarm-hacker-news-blog.md
+docs/superpowers/
 
 # VitePress / Node
 node_modules/

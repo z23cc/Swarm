@@ -34,9 +34,9 @@ import Foundation
 ///
 /// ```swift
 /// // Create an HTTP MCP server connection
-/// let server = HTTPMCPServer(
-///     name: "filesystem-server",
-///     baseURL: URL(string: "http://localhost:8080")!
+/// let server = try HTTPMCPServer(
+///     url: URL(string: "http://localhost:8080")!,
+///     name: "filesystem-server"
 /// )
 ///
 /// do {
@@ -68,10 +68,9 @@ import Foundation
 ///             print("Resource \(resource.name): \(content)")
 ///         }
 ///     }
+///     try await server.close()
 /// } catch {
 ///     print("MCP error: \(error)")
-/// } finally {
-///     // Always close the connection
 ///     try? await server.close()
 /// }
 /// ```
@@ -131,7 +130,7 @@ public protocol MCPServer: Sendable {
     ///
     /// ## Example
     /// ```swift
-    /// let server = HTTPMCPServer(name: "my-server", baseURL: url)
+    /// let server = try HTTPMCPServer(url: url, name: "my-server")
     /// let capabilities = try await server.initialize()
     /// print("Tools supported: \(capabilities.tools)")
     /// ```

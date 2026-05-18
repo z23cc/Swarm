@@ -235,9 +235,9 @@ Validation catches:
 - skill directory and skill name mismatches
 - invalid agent specs
 
-Runtime behavior is tolerant:
+Runtime behavior is strict for listed specs/skills and tolerant for memory notes:
 
-- bad skills are skipped
+- invalid listed `SKILL.md` files fail `Agent.spec`
 - bad specs fail when you try to build that agent
 - malformed memory notes are skipped and logged
 - malformed memory notes are moved to `.swarm/quarantine/`

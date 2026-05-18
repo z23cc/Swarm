@@ -59,7 +59,7 @@ import Foundation
 ///
 /// ```swift
 /// let provider = OpenAIEmbeddingProvider(apiKey: apiKey)
-/// let memory = Memory.vector(
+/// let memory: VectorMemory = .vector(
 ///     embeddingProvider: provider,
 ///     similarityThreshold: 0.75,
 ///     maxResults: 10

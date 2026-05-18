@@ -54,7 +54,7 @@ if !coreOnly {
         ),
         .package(url: "https://github.com/christopherkarani/ContextCore.git", exact: "1.0.0"),
         .package(url: "https://github.com/christopherkarani/Membrane", exact: "0.1.3"),
-        .package(url: "https://github.com/christopherkarani/Hive", exact: "0.2.0"),
+        .package(url: "https://github.com/christopherkarani/Hive", exact: "0.2.1"),
     ]
 }
 
@@ -66,7 +66,6 @@ var swarmDependencies: [Target.Dependency] = [
 
 var swarmSwiftSettings: [SwiftSetting] = [
     .enableExperimentalFeature("StrictConcurrency"),
-    .define("SWARM_HIVE", .when(traits: ["hive"])),
 ]
 
 if !coreOnly {
@@ -267,10 +266,6 @@ let package = Package(
         .trait(
             name: integrationTrait,
             description: "Enable provider, memory, graph runtime, Wax, Membrane, ContextCore, Conduit, and Hive integrations."
-        ),
-        .trait(
-            name: "hive",
-            description: "Enable Hive-backed workflow and runtime integration features."
         ),
     ],
     dependencies: packageDependencies,

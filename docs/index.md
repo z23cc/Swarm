@@ -34,7 +34,7 @@ features:
 
   - icon: "\U0001F9E0"
     title: Semantic Memory -- On-Device
-    details: VectorMemory uses Accelerate SIMD for cosine similarity. No cloud API. No network call. Just fast local retrieval.
+    details: VectorMemory performs local similarity search; embedding privacy depends on the provider you configure.
     link: /reference/front-facing-api
     linkText: Memory factories
 
@@ -95,8 +95,8 @@ let result = try await Workflow()
 | Language | **Swift 6.2** | Python | Python |
 | Data race safety | **Compile-time** | Runtime | Runtime |
 | On-device LLM | **Foundation Models** | -- | -- |
-| Execution engine | **Compiled DAG** | Loop-based | Loop-based |
-| Crash recovery | **Auto checkpoints** | -- | Partial |
+| Execution model | **Typed `Workflow` graph** | Loop-based | Loop-based |
+| Crash recovery | **Explicit checkpoints** | -- | Partial |
 | Type-safe tools | **@Tool macro** | Decorators | Runtime |
 | Streaming | **AsyncThrowingStream** | Callbacks | Callbacks |
 | iOS / macOS | **First-class** | -- | -- |

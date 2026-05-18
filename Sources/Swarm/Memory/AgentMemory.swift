@@ -33,19 +33,19 @@ import Foundation
 ///
 /// ```swift
 /// // Simple conversation history (most common)
-/// let memory = Memory.conversation(maxMessages: 50)
+/// let memory: ConversationMemory = .conversation(maxMessages: 50)
 ///
 /// // Semantic search with embeddings (for RAG)
-/// let vectorMemory = Memory.vector(
+/// let vectorMemory: VectorMemory = .vector(
 ///     embeddingProvider: myProvider,
 ///     similarityThreshold: 0.75
 /// )
 ///
 /// // Token-bounded sliding window
-/// let slidingMemory = Memory.slidingWindow(maxTokens: 8000)
+/// let slidingMemory: SlidingWindowMemory = .slidingWindow(maxTokens: 8000)
 ///
 /// // With automatic summarization
-/// let summaryMemory = Memory.summary(
+/// let summaryMemory: SummaryMemory = .summary(
 ///     configuration: .init(recentMessageCount: 30)
 /// )
 /// ```
@@ -55,12 +55,8 @@ import Foundation
 /// Memory is attached to agents using the fluent API:
 ///
 /// ```swift
-/// let agent = Agent(
-///     id: "assistant",
-///     model: gpt4,
-///     instructions: "You are a helpful assistant."
-/// )
-/// .withMemory(.conversation(maxMessages: 100))
+/// let agent = try Agent("You are a helpful assistant.")
+///     .withMemory(.conversation(maxMessages: 100))
 /// ```
 ///
 /// ## Implementing Custom Memory

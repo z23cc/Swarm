@@ -253,15 +253,12 @@ agent.environment(\.inferenceProvider, .anthropic(key: "sk-..."))
 | Linux | Ubuntu 22.04+ with Swift 6.2 |
 
 ::: tip
-Foundation Models require iOS 26 / macOS 26. Linux CI verifies the core
-`Swarm` and `SwarmMCP` build lane with `scripts/ci/verify-linux-core.sh`.
-Provider availability on Linux depends on the selected provider package and its
-published dependency graph.
+The default Swarm graph is CI-tested on Ubuntu with Swift 6.2. Apple-only features such as Foundation Models, SwiftData, OSLog, and some built-in tool behavior are unavailable or different on Linux; cloud providers and Ollama use the shared `InferenceProvider` surface.
 :::
 
 ## Next Steps
 
 - **[Agents](../reference/front-facing-api.md#3-agent-struct-primary-init)** -- Agent types, configuration, tool calling
-- **[Tools](../reference/front-facing-api.md#5-tool-and-functiontool)** -- `@Tool` macro, `FunctionTool`, tool chains
+- **[Tools](../reference/front-facing-api.md#5-tool-and-functiontool)** -- `@Tool` macro, `FunctionTool`, `ToolCollection`, and `@ToolBuilder`
 - **[Workflow](../reference/front-facing-api.md#7-workflow)** -- Sequential, parallel, and routed execution
-- **[Memory](../reference/front-facing-api.md#10-memoryoption)** -- Conversation, vector, summary, persistent
+- **[Memory](../reference/front-facing-api.md#9-memory-factories)** -- Conversation, vector, summary, persistent

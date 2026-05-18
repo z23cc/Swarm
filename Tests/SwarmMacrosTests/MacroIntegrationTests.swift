@@ -33,7 +33,7 @@ final class MacroIntegrationTests: XCTestCase {
     func testToolMacroIntegrationExecutesThroughAnyJSONToolAdapter() async throws {
         let tool = IntegrationAddTool().asAnyJSONTool()
 
-        XCTAssertEqual(tool.name, "integrationadd")
+        XCTAssertEqual(tool.name, "integration_add")
         XCTAssertEqual(tool.description, "Adds two numbers")
         XCTAssertEqual(tool.parameters.map(\.name), ["a", "b"])
 
@@ -74,6 +74,6 @@ final class MacroIntegrationTests: XCTestCase {
             IntegrationGreetTool()
         }
 
-        XCTAssertEqual(agent.tools.map(\.name), ["integrationadd", "integrationgreet"])
+        XCTAssertEqual(agent.tools.map(\.name), ["integration_add", "integration_greet"])
     }
 }

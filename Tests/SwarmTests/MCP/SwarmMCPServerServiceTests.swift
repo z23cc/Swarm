@@ -413,7 +413,7 @@ struct SwarmMCPServerServiceTests {
 }
 
 private func textContent(from content: [MCP.Tool.Content]) -> String? {
-    guard case let .text(text: text, annotations: _, _meta: _)? = content.first else {
+    guard case let .text(text)? = content.first else {
         return nil
     }
     return text

@@ -196,7 +196,7 @@ public extension AsyncThrowingStream where Element == AgentEvent, Failure == Err
     /// Example:
     /// ```swift
     /// let filtered = stream.filter { event in
-    ///     if case .thinking(let thought) = event {
+    ///     if case .output(.thinking(thought: let thought)) = event {
     ///         return thought.count > 10
     ///     }
     ///     return false
@@ -223,7 +223,7 @@ public extension AsyncThrowingStream where Element == AgentEvent, Failure == Err
     /// Example:
     /// ```swift
     /// let uppercased = stream.map { event -> String in
-    ///     if case .thinking(let thought) = event {
+    ///     if case .output(.thinking(thought: let thought)) = event {
     ///         return thought.uppercased()
     ///     }
     ///     return ""
@@ -310,7 +310,7 @@ public extension AsyncThrowingStream where Element == AgentEvent, Failure == Err
     /// Example:
     /// ```swift
     /// let firstThinking = try await stream.first { event in
-    ///     if case .thinking = event { return true }
+    ///     if case .output(.thinking) = event { return true }
     ///     return false
     /// }
     /// ```
@@ -355,7 +355,7 @@ public extension AsyncThrowingStream where Element == AgentEvent, Failure == Err
     /// Example:
     /// ```swift
     /// let combined = try await stream.reduce("") { acc, event in
-    ///     if case .thinking(let thought) = event {
+    ///     if case .output(.thinking(thought: let thought)) = event {
     ///         return acc + thought
     ///     }
     ///     return acc
@@ -728,7 +728,7 @@ public extension AsyncThrowingStream where Element == AgentEvent, Failure == Err
     /// ```swift
     /// // Extract only thinking content as uppercase strings
     /// let thoughts = stream.compactMap { event -> String? in
-    ///     if case .thinking(let thought) = event {
+    ///     if case .output(.thinking(thought: let thought)) = event {
     ///         return thought.uppercased()
     ///     }
     ///     return nil
@@ -805,7 +805,7 @@ public extension AsyncThrowingStream where Element == AgentEvent, Failure == Err
     /// ```swift
     /// // Accumulate all thinking content
     /// for try await combined in stream.scan("") { acc, event in
-    ///     if case .thinking(let thought) = event {
+    ///     if case .output(.thinking(thought: let thought)) = event {
     ///         return acc + thought
     ///     }
     ///     return acc
@@ -957,9 +957,9 @@ public enum AgentEventStream {
     /// Example:
     /// ```swift
     /// let stream = AgentEventStream.from([
-    ///     .started(input: "test"),
-    ///     .thinking(thought: "Processing..."),
-    ///     .completed(result: result)
+    ///     .lifecycle(.started(input: "test")),
+    ///     .output(.thinking(thought: "Processing...")),
+    ///     .lifecycle(.completed(result: result))
     /// ])
     /// ```
     public static func from(_ events: [AgentEvent]) -> AsyncThrowingStream<AgentEvent, Error> {

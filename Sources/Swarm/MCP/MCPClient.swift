@@ -27,8 +27,8 @@ import Foundation
 /// let client = MCPClient()
 ///
 /// // Add servers
-/// let filesystemServer = HTTPMCPServer(name: "filesystem", baseURL: filesystemURL)
-/// let databaseServer = HTTPMCPServer(name: "database", baseURL: databaseURL)
+/// let filesystemServer = try HTTPMCPServer(url: filesystemURL, name: "filesystem")
+/// let databaseServer = try HTTPMCPServer(url: databaseURL, name: "database")
 ///
 /// try await client.addServer(filesystemServer)
 /// try await client.addServer(databaseServer)
@@ -88,7 +88,7 @@ public actor MCPClient {
     ///
     /// ## Example
     /// ```swift
-    /// let server = HTTPMCPServer(name: "my-server", baseURL: serverURL)
+    /// let server = try HTTPMCPServer(url: serverURL, name: "my-server")
     /// try await client.addServer(server)
     /// print("Connected to \(server.name)")
     /// ```

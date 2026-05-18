@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'Swarm',
   description: 'Multi-agent orchestration for Swift — built for production, not demos.',
-  base: '/Swarm/',
+  base: '/',
 
   head: [
     // Satoshi from Fontshare
@@ -13,7 +13,7 @@ export default defineConfig({
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
     ['link', { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap' }],
     // Favicon
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/Swarm/logo.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
   ],
 
   ignoreDeadLinks: false,
@@ -29,7 +29,8 @@ export default defineConfig({
     },
   },
 
-  // Exclude internal planning docs that contain raw angle brackets
+  // Exclude internal planning docs, historical reports, and archival generated
+  // references that are retained in the repository but are not website docs.
   srcExclude: [
     '**/BEST_PRACTICES.md',
     '**/DSL_IMPLEMENTATION_PROGRESS.md',
@@ -39,15 +40,23 @@ export default defineConfig({
     '**/migration-plan_*.md',
     '**/subagent-context-findings.md',
     '**/MultiProvider.md',
+    '**/reference/api-quality-assessment.md',
+    '**/reference/docc-audit-report.md',
+    '**/reference/docs-folder-audit-report.md',
+    '**/reference/documentation-gap-report.md',
+    '**/reference/documentation-validation-report.md',
+    '**/reference/durable-runtime-hardening.md',
+    '**/swarm-features.md',
     '**/swarm-complete-reference.md',
     '**/reference/documentation-improvement-plan.md',
     '**/plans/**',
+    '**/superpowers/**',
     '**/validation/**',
     '**/work-packages/**',
   ],
 
   themeConfig: {
-    logo: '/Swarm/logo.svg',
+    logo: '/logo.svg',
 
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },

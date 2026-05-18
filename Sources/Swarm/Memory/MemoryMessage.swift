@@ -66,7 +66,7 @@ import Foundation
 /// Messages are added to a ``Memory`` implementation:
 ///
 /// ```swift
-/// let memory = Memory.conversation(maxMessages: 100)
+/// let memory: ConversationMemory = .conversation(maxMessages: 100)
 /// await memory.add(MemoryMessage.user("Hello!"))
 /// await memory.add(MemoryMessage.assistant("Hi there!"))
 /// ```

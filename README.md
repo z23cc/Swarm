@@ -153,6 +153,16 @@ swift run SwarmCapabilityShowcase smoke
 
 The deterministic matrix is CI-safe. Live-provider smoke coverage is opt-in through environment variables. See [docs/guide/capability-showcase.md](docs/guide/capability-showcase.md) for the scenario catalog and smoke-mode details.
 
+### Optional demos
+
+Demo executables are opt-in so the default library graph stays focused on the framework products:
+
+```bash
+SWARM_INCLUDE_DEMO=1 swift build
+SWARM_INCLUDE_DEMO=1 swift run SwarmDemo
+SWARM_INCLUDE_DEMO=1 swift run SwarmMCPServerDemo
+```
+
 ### Multi-agent pipeline
 
 ```swift
@@ -170,7 +180,7 @@ let result = try await Workflow()
     .run("Latest advances in on-device ML")
 ```
 
-Each agent resolves its own provider. Pass `inferenceProvider:` per agent (as above), or call `Swarm.configure(provider: .anthropic(key: "..."))` once at app startup to share a default across every agent that doesn't specify one.
+Each agent resolves its own provider. Pass `inferenceProvider:` per agent (as above), or call `await Swarm.configure(provider: .anthropic(apiKey: "..."))` once at app startup to share a default across every agent that doesn't specify one.
 
 ### Parallel fan-out
 
@@ -202,7 +212,7 @@ for try await event in agent.stream("Summarize the changelog.") {
     case .tool(.completed(let call, _)):   print("\n[tool: \(call.toolName)]")
     case .lifecycle(.completed(let r)):     print("\nDone in \(r.duration)")
     case .lifecycle(.failed(let error)):    print("\nError: \(error)")
-    default: break // Other events: .thinking, .handoff, .observation, .iterationStarted, etc. See AgentEvent in docs/reference/api-catalog.md.
+    default: break // Other events include .output(.thinking(...)), .handoff(...), .observation(...), and .lifecycle(.iterationStarted(...)).
     }
 }
 ```
@@ -289,7 +299,7 @@ for message in await conversation.messages {
 | **Language** | Swift 6.2 | Python | Python |
 | **Data race safety** | Compile-time | Runtime | Runtime |
 | **On-device LLM** | Foundation Models | n/a | n/a |
-| **Execution engine** | Compiled DAG | Loop-based | Loop-based |
+| **Execution model** | Typed `Workflow` graph | Loop-based | Loop-based |
 | **Crash recovery** | Checkpoints | n/a | Partial |
 | **Type-safe tools** | `@Tool` macro (compile-time) | Decorators (runtime) | Runtime |
 | **Streaming** | `AsyncThrowingStream` | Callbacks | Callbacks |
@@ -302,7 +312,7 @@ for message in await conversation.messages {
 | **Agents** | `Agent` struct with `@ToolBuilder` trailing closure, `AgentRuntime` protocol |
 | **Workflows** | `Workflow`: `.step()`, `.parallel()`, `.route()`, `.repeatUntil()`, `.timeout()` |
 | **Tools** | `@Tool` macro, `FunctionTool`, `@ToolBuilder`, parallel execution |
-| **Memory** | `Memory.conversation(maxMessages:)`, `Memory.vector(embeddingProvider:similarityThreshold:maxResults:)`, `Memory.slidingWindow(maxTokens:)`, `Memory.summary(configuration:summarizer:)`, `Memory.hybrid(configuration:summarizer:)` |
+| **Memory** | `.conversation(maxMessages:)`, `.vector(embeddingProvider:similarityThreshold:maxResults:)`, `.slidingWindow(maxTokens:)`, `.summary(configuration:summarizer:)`, `.hybrid(configuration:summarizer:)` |
 | **Guardrails** | `InputGuard.maxLength()`, `InputGuard.notEmpty()`, `InputGuard.custom()`, `OutputGuard.maxLength()`, `OutputGuard.custom()` |
 | **Conversation** | `Conversation` actor for stateful multi-turn dialogue |
 | **Resilience** | 7 backoff strategies, circuit breaker, fallback chains, rate limiting |
@@ -328,7 +338,7 @@ for message in await conversation.messages {
 │  InputGuard · OutputGuard · Resilience · Observability · MCP│
 ├─────────────────────────────────────────────────────────────┤
 │              Durable Graph Runtime (internal)               │
-│   Compiled DAG  ·  Checkpointing  ·  Deterministic retry   │
+│   Workflow Graph  ·  Checkpointing  ·  Deterministic retry │
 ├─────────────────────────────────────────────────────────────┤
 │              InferenceProvider (pluggable)                   │
 │ Foundation Models · Anthropic · OpenAI · Ollama · OpenRouter│
@@ -345,15 +355,7 @@ for message in await conversation.messages {
 | tvOS     | 26.0+   |
 | Linux    | Ubuntu 22.04+ with Swift 6.2 |
 
-Foundation Models require iOS 26 / macOS 26. Linux CI verifies the core
-`Swarm` and `SwarmMCP` build lane with:
-
-```bash
-scripts/ci/verify-linux-core.sh
-```
-
-Provider availability on Linux depends on the selected provider package and its
-published dependency graph.
+The default Swarm graph is CI-tested on Ubuntu with Swift 6.2. Apple-only features such as Foundation Models, SwiftData, OSLog, and some built-in tool behavior are unavailable or different on Linux; cloud providers and Ollama use the shared `InferenceProvider` surface.
 
 ## Documentation
 

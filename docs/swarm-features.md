@@ -1,5 +1,10 @@
 # Swarm Framework - Comprehensive Feature Guide
 
+> **Archival note:** This is an archival generated feature guide from an earlier API pass. It is not the source of truth for the current public API surface. Use
+> `README.md`, `docs/guide/getting-started.md`,
+> `docs/reference/overview.md`, `docs/reference/front-facing-api.md`, and
+> `docs/reference/api-catalog.md` for current Swarm 0.5.1 API usage.
+
 > A thorough exploration of Swarm's agent architecture, composable APIs, orchestration patterns, and memory system for the Swift AI developer community.
 
 ---
@@ -108,9 +113,6 @@ public enum AgentEvent: Sendable {
 ### Callable Syntax
 
 ```swift
-let callable = CallableAgent(myAgent)
-let result = try await callable("What is 2+2?")
-// or
 let result = try await myAgent("What is 2+2?")  // via extension
 ```
 
@@ -645,7 +647,7 @@ let llm = LLM.openRouter(apiKey: key, model: "anthropic/claude-3.5-sonnet") { ro
 }
 
 // Ollama (local)
-let llm = LLM.ollama(model: "mistral")
+let llm = LLM.ollama("mistral")
 ```
 
 ### Minimal API: `ConduitProviderSelection`
@@ -806,4 +808,4 @@ let result = try await Workflow()
 
 ---
 
-*Document generated from Swarm framework source analysis. For the latest updates, check the [Swarm repository](https://github.com/anthropics/swarm).*
+*Document generated from historical Swarm framework source analysis. For the latest updates, check the [Swarm repository](https://github.com/christopherkarani/Swarm).*

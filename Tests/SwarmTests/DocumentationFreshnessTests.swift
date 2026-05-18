@@ -1,4 +1,5 @@
 import Foundation
+@testable import Swarm
 import Testing
 
 @Suite("Documentation Freshness")
@@ -20,9 +21,15 @@ struct DocumentationFreshnessTests {
         let workflowStreamLine = try lineNumber(containing: "public func stream(_ input", in: workflowSource)
         let scannedSourceCount = try countPublicCatalogSourceFiles()
 
-        #expect(catalog.contains("Generated from `Sources/Swarm/` on 2026-04-30."))
+        #expect(catalog.contains("Generated from `Sources/Swarm/` on 2026-04-30; source-verified and refreshed for high-risk public rows on 2026-05-18."))
         #expect(catalog.contains("- Source files scanned: \(scannedSourceCount)"))
         #expect(catalog.contains("| \(workflowStreamLine) | func | public | Workflow.stream(_:)"))
+        #expect(catalog.contains("| 42 | enum | public | Swarm | `public enum Swarm` |"))
+        #expect(catalog.contains("| 13 | struct | public | LLM | `public struct LLM` |"))
+        #expect(catalog.contains("LLM.ollama(_:configure:)"))
+        #expect(!catalog.contains("| 12 | enum | public | LLM | `public enum LLM` |"))
+        #expect(!catalog.contains("public case openAI(LLM.OpenAIConfig)"))
+        #expect(!catalog.contains("LLM.OpenAIConfig"))
     }
 
     @Test("public docs do not link stale complete reference")
@@ -36,10 +43,48 @@ struct DocumentationFreshnessTests {
         #expect(!overview.contains("swarm-complete-reference"))
     }
 
+    @Test("public repo hygiene blocks internal reports and marketing drafts")
+    func publicRepoHygieneBlocksInternalReportsAndMarketingDrafts() throws {
+        let removedPublicArtifacts = [
+            "docs/reference/docs-folder-audit-report.md",
+            "docs/reference/docc-audit-report.md",
+            "docs/reference/documentation-gap-report.md",
+            "docs/reference/documentation-improvement-plan.md",
+            "docs/reference/documentation-validation-report.md",
+            "docs/reference/twitter-article-web-memory-plane.md",
+            "docs/swarm-hacker-news-blog.md",
+            "docs/superpowers/specs/2026-03-16-v3-final-push-design.md",
+            "docs/superpowers/specs/2026-03-18-ai-code-reviewer-design.md",
+            "tasks/todo.md",
+        ]
+
+        for file in removedPublicArtifacts {
+            #expect(!FileManager.default.fileExists(atPath: repoRoot.appendingPathComponent(file).path), "\(file) should not be present in the public repo")
+        }
+
+        let gitignore = try readRepoFile(".gitignore")
+        let agentRules = try readRepoFile("AGENTS.md")
+
+        for pattern in [
+            "tasks/",
+            "docs/superpowers/",
+            "docs/reference/*audit-report.md",
+            "docs/reference/documentation-*-report.md",
+            "docs/reference/documentation-improvement-plan.md",
+            "docs/reference/twitter-article-*.md",
+            "docs/swarm-hacker-news-blog.md",
+            "marketing/",
+        ] {
+            #expect(gitignore.contains(pattern), "\(pattern) should stay ignored")
+            #expect(agentRules.contains(pattern), "\(pattern) should be called out for future agents")
+        }
+    }
+
     @Test("API catalog excludes package-only and removed symbols")
     func apiCatalogExcludesPackageOnlyAndRemovedSymbols() throws {
         let catalog = try readRepoFile("docs/reference/api-catalog.md")
 
+        #expect(!catalog.contains("AnyMemory"))
         #expect(!catalog.contains("AgentRuntimeIdentifiable"))
         #expect(!catalog.contains("CallableAgent"))
         #expect(!catalog.contains("Tools/ToolChainBuilder.swift"))
@@ -52,8 +97,6 @@ struct DocumentationFreshnessTests {
             "README.md",
             "docs/reference/front-facing-api.md",
             "docs/reference/api-catalog.md",
-            "docs/reference/docs-folder-audit-report.md",
-            "docs/reference/documentation-validation-report.md",
             "docs/swarm-complete-reference.md",
         ]
 
@@ -94,11 +137,12 @@ struct DocumentationFreshnessTests {
 
     @Test("public release docs point at the latest remote tag represented by this checkout")
     func publicReleaseDocsUsePublishedVersion() throws {
-        let expectedVersion = "0.5.1"
+        let expectedVersion = Swarm.version
         let checkedFiles = [
             "README.md",
             "docs/index.md",
             "docs/guide/getting-started.md",
+            "docs/guide/opentelemetry-tracing.md",
             "docs/reference/overview.md",
             "Sources/Swarm/Swarm.swift",
             "Tests/SwarmTests/V2SurfaceAuditTests.swift",
@@ -109,6 +153,203 @@ struct DocumentationFreshnessTests {
             #expect(text.contains(expectedVersion), "\(file) should mention \(expectedVersion)")
             #expect(!text.contains("0.5.2"), "\(file) should not advertise unreleased 0.5.2")
         }
+    }
+
+    @Test("front-facing docs cover exported companion products")
+    func frontFacingDocsCoverExportedCompanionProducts() throws {
+        let docs = try readRepoFile("docs/reference/front-facing-api.md")
+        let package = try readRepoFile("Package.swift")
+
+        #expect(package.contains(".library(name: \"SwarmOpenTelemetry\""))
+        #expect(package.contains(".library(name: \"SwarmMembrane\""))
+        #expect(package.contains(".library(name: \"SwarmMCP\""))
+
+        #expect(docs.contains("SwarmOpenTelemetry"))
+        #expect(docs.contains("instrumentedWithOpenTelemetry"))
+        #expect(docs.contains("SwarmMembrane"))
+        #expect(docs.contains("@_exported import Swarm"))
+        #expect(docs.contains("SwarmMCPServerService"))
+        #expect(docs.contains("SwarmMCPToolRegistryAdapter"))
+    }
+
+    @Test("public macro docs include the inline tool macro")
+    func publicMacroDocsIncludeInlineToolMacro() throws {
+        let source = try readRepoFile("Sources/Swarm/Macros/MacroDeclarations.swift")
+        let frontFacing = try readRepoFile("docs/reference/front-facing-api.md")
+        let catalog = try readRepoFile("docs/reference/api-catalog.md")
+
+        #expect(source.contains("public macro Tool(\n    _ name: String,\n    _ description: String"))
+        #expect(frontFacing.contains("`#Tool(\"name\", \"description\")`"))
+        #expect(catalog.contains("Tool(_:_:)"))
+    }
+
+    @Test("getting started uses current memory anchor")
+    func gettingStartedUsesCurrentMemoryAnchor() throws {
+        let guide = try readRepoFile("docs/guide/getting-started.md")
+
+        #expect(!guide.contains("MemoryOption"))
+        #expect(!guide.contains("#10-memoryoption"))
+        #expect(!guide.contains("tool chains"))
+        #expect(guide.contains("#9-memory-factories"))
+    }
+
+    @Test("public docs use current memory factory spelling")
+    func publicDocsUseCurrentMemoryFactorySpelling() throws {
+        let checkedFiles = [
+            "README.md",
+            "docs/reference/front-facing-api.md",
+            "Sources/Swarm/Memory/AgentMemory.swift",
+            "Sources/Swarm/Memory/EmbeddingProvider.swift",
+            "Sources/Swarm/Memory/MemoryMessage.swift",
+        ]
+
+        for file in checkedFiles {
+            let text = try readRepoFile(file)
+            #expect(!text.contains("Memory.conversation"), "\(file) should use contextual .conversation(...) spelling")
+            #expect(!text.contains("Memory.vector"), "\(file) should use contextual .vector(...) spelling")
+            #expect(!text.contains("Memory.slidingWindow"), "\(file) should use contextual .slidingWindow(...) spelling")
+            #expect(!text.contains("Memory.summary"), "\(file) should use contextual .summary(...) spelling")
+            #expect(!text.contains("Memory.hybrid"), "\(file) should use contextual .hybrid(...) spelling")
+            #expect(!text.contains("Memory.persistent"), "\(file) should use contextual .persistent(...) spelling")
+        }
+    }
+
+    @Test("source DocC examples use throwing Agent initializers correctly")
+    func sourceDocCExamplesUseThrowingAgentInitializersCorrectly() throws {
+        let builtInTools = try readRepoFile("Sources/Swarm/Tools/BuiltInTools.swift")
+
+        #expect(!builtInTools.contains("let agent = Agent(tools: BuiltInTools.all)"))
+        #expect(builtInTools.contains("let agent = try Agent(tools: BuiltInTools.all)"))
+    }
+
+    @Test("website docs do not advertise unsupported workflow guarantees")
+    func websiteDocsDoNotAdvertiseUnsupportedWorkflowGuarantees() throws {
+        let checkedFiles = [
+            "README.md",
+            "docs/index.md",
+        ]
+
+        for file in checkedFiles {
+            let text = try readRepoFile(file)
+            #expect(!text.contains("Auto checkpoints"), "\(file) should describe explicit workflow checkpointing")
+            #expect(!text.contains("Compiled DAG"), "\(file) should not overstate the public workflow execution model")
+        }
+
+        let index = try readRepoFile("docs/index.md")
+        #expect(!index.contains("No cloud API. No network call."), "homepage should not overstate embedding-provider privacy")
+        #expect(index.contains("embedding privacy depends on the provider you configure"))
+    }
+
+    @Test("website build excludes archival and internal markdown")
+    func websiteBuildExcludesArchivalAndInternalMarkdown() throws {
+        let config = try readRepoFile("docs/.vitepress/config.ts")
+        let excludedPaths = [
+            "**/reference/api-quality-assessment.md",
+            "**/reference/docc-audit-report.md",
+            "**/reference/docs-folder-audit-report.md",
+            "**/reference/documentation-gap-report.md",
+            "**/reference/documentation-improvement-plan.md",
+            "**/reference/documentation-validation-report.md",
+            "**/reference/durable-runtime-hardening.md",
+            "**/swarm-features.md",
+            "**/swarm-complete-reference.md",
+            "**/superpowers/**",
+        ]
+
+        for path in excludedPaths {
+            #expect(config.contains(path), "\(path) should be excluded from the public website build")
+        }
+
+        let overview = try readRepoFile("docs/reference/overview.md")
+        #expect(!overview.contains("/reference/durable-runtime-hardening"), "overview should not link to a page excluded from the website build")
+    }
+
+    @Test("website config matches custom domain deployment")
+    func websiteConfigMatchesCustomDomainDeployment() throws {
+        let config = try readRepoFile("docs/.vitepress/config.ts")
+        let cname = try readRepoFile("docs/public/CNAME").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        #expect(cname == "docs.swarm.dev")
+        #expect(config.contains("base: '/',"))
+        #expect(config.contains("href: '/logo.svg'"))
+        #expect(config.contains("logo: '/logo.svg'"))
+        #expect(!config.contains("base: '/Swarm/'"))
+        #expect(!config.contains("/Swarm/logo.svg"))
+    }
+
+    @Test("docs workflow and release checklist cover docs gates")
+    func docsWorkflowAndReleaseChecklistCoverDocsGates() throws {
+        let workflow = try readRepoFile(".github/workflows/docs.yml")
+        let checklist = try readRepoFile("docs/release/release-checklist.md")
+
+        #expect(workflow.contains("pull_request:"))
+        #expect(workflow.contains("npm ci"))
+        #expect(workflow.contains("npm run docs:build"))
+        #expect(workflow.contains("if: github.event_name == 'push' && github.ref == 'refs/heads/main'"))
+
+        let requiredCommands = [
+            "swift build",
+            "swift test --no-parallel",
+            "swift run SwarmCapabilityShowcase matrix",
+            "cd Examples/CodeReviewer && swift test",
+            "npm ci",
+            "npm run docs:build",
+            "scripts/ci/verify-remote-release.sh",
+        ]
+
+        for command in requiredCommands {
+            #expect(checklist.contains(command), "release checklist should include \(command)")
+        }
+    }
+
+    @Test("front-facing docs list current runtime wrappers")
+    func frontFacingDocsListCurrentRuntimeWrappers() throws {
+        let docs = try readRepoFile("docs/reference/front-facing-api.md")
+        let environmentAgent = try readRepoFile("Sources/Swarm/Core/EnvironmentAgent.swift")
+        let observedAgent = try readRepoFile("Sources/Swarm/Core/ObservedAgent.swift")
+
+        #expect(environmentAgent.contains("func promptTokenCounter(_ counter: any PromptTokenCounter)"))
+        #expect(environmentAgent.contains("func webSearch(_ configuration: WebSearchTool.Configuration)"))
+        #expect(observedAgent.contains("func observed(by observer: some AgentObserver)"))
+
+        #expect(docs.contains("agent.promptTokenCounter(myCounter)"))
+        #expect(docs.contains("agent.webSearch(WebSearchTool.Configuration(enabled: false))"))
+        #expect(docs.contains("agent.observed(by: myObserver)"))
+        #expect(!docs.contains("Only `.environment()` and `.memory()` exist"))
+    }
+
+    @Test("MCP doc snippets use current API shapes")
+    func mcpDocSnippetsUseCurrentAPIShapes() throws {
+        let checkedFiles = [
+            "Sources/Swarm/MCP/MCPClient.swift",
+            "Sources/Swarm/MCP/MCPServer.swift",
+            "Sources/Swarm/MCP/MCPProtocol.swift",
+        ]
+
+        for file in checkedFiles {
+            let text = try readRepoFile(file)
+            #expect(!text.contains("HTTPMCPServer(name:"), "\(file) should not use removed HTTPMCPServer(name:baseURL:) initializer")
+            #expect(!text.contains("baseURL:"), "\(file) should not use removed HTTPMCPServer baseURL label")
+            #expect(!text.contains("finally {"), "\(file) should not show non-Swift finally syntax")
+        }
+
+        let protocolSource = try readRepoFile("Sources/Swarm/MCP/MCPProtocol.swift")
+        #expect(protocolSource.contains("\"name\": .string(\"calculator\")"))
+        #expect(protocolSource.contains("\"arguments\": .dictionary([\"expression\": .string(\"2 + 2\")])"))
+    }
+
+    @Test("README and workspace docs do not overstate usage paths")
+    func readmeAndWorkspaceDocsDoNotOverstateUsagePaths() throws {
+        let readme = try readRepoFile("README.md")
+        let workspace = try readRepoFile("docs/guide/agent-workspace.md")
+
+        #expect(readme.contains("await Swarm.configure(provider:"))
+        #expect(!readme.contains("call `Swarm.configure(provider:"))
+        #expect(!readme.contains(".thinking, .handoff, .observation, .iterationStarted"))
+
+        #expect(!workspace.contains("bad skills are skipped"))
+        #expect(workspace.contains("invalid listed `SKILL.md` files fail `Agent.spec`"))
+        #expect(workspace.contains("malformed memory notes are skipped"))
     }
 
     @Test("CI and docs inputs required by clean clones are present")
@@ -133,7 +374,7 @@ struct DocumentationFreshnessTests {
         let workflow = try readRepoFile(".github/workflows/docs.yml")
 
         #expect(workflow.contains("pull_request:"))
-        #expect(workflow.contains("if: github.event_name != 'pull_request'"))
+        #expect(workflow.contains("if: github.event_name == 'push' && github.ref == 'refs/heads/main'"))
         #expect(workflow.contains("npm run docs:build"))
     }
 
@@ -157,21 +398,17 @@ struct DocumentationFreshnessTests {
         #expect(script.contains("CodeReviewer test log"))
     }
 
-    @Test("Linux workflow runs the shared core-lane verifier")
-    func linuxWorkflowRunsSharedCoreLaneVerifier() throws {
+    @Test("Linux workflow builds the default package graph")
+    func linuxWorkflowBuildsDefaultPackageGraph() throws {
         let workflow = try readRepoFile(".github/workflows/swift.yml")
-        let script = try readRepoFile("scripts/ci/verify-linux-core.sh")
 
         #expect(workflow.contains("Build (Linux Core)"))
-        #expect(workflow.contains("scripts/ci/verify-linux-core.sh"))
-        #expect(workflow.contains("SWARM_CORE_ONLY=1 swift test"))
-        #expect(script.contains("SWARM_CORE_ONLY=1"))
-        #expect(script.contains("--disable-default-traits --target Swarm"))
-        #expect(script.contains("--disable-default-traits --target SwarmMCP"))
+        #expect(workflow.contains("swift build"))
+        #expect(workflow.contains("swift test --no-parallel"))
     }
 
-    @Test("public Linux docs point at the core verifier instead of overclaiming provider parity")
-    func publicLinuxDocsPointAtCoreVerifier() throws {
+    @Test("public Linux docs qualify default graph support")
+    func publicLinuxDocsQualifyDefaultGraphSupport() throws {
         let checkedFiles = [
             "README.md",
             "docs/guide/getting-started.md",
@@ -179,8 +416,8 @@ struct DocumentationFreshnessTests {
 
         for file in checkedFiles {
             let text = try readRepoFile(file)
-            #expect(text.contains("scripts/ci/verify-linux-core.sh"), "\(file) should point at the Linux core verifier")
-            #expect(text.contains("Provider availability on Linux depends"), "\(file) should qualify provider support")
+            #expect(text.contains("default Swarm graph is CI-tested on Ubuntu with Swift 6.2"), "\(file) should state the verified Linux lane")
+            #expect(text.contains("Apple-only features such as Foundation Models, SwiftData, OSLog"), "\(file) should qualify platform-specific APIs")
         }
     }
 

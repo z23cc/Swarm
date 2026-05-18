@@ -15,8 +15,8 @@ struct InferenceProviderCapabilityContractTests {
         #expect(capabilities == [.conversationMessages, .responseContinuation])
     }
 
-    @Test("Text-only conversation adapter preserves base streaming and continuation capabilities")
-    func textOnlyAdapterPreservesBaseCapabilities() {
+    @Test("Text-only conversation adapter strips streaming tool-call capability")
+    func textOnlyAdapterStripsStreamingToolCalls() {
         let base = CertifiedPromptToolStreamingProvider(
             scripts: [[]],
             capabilities: [.streamingToolCalls, .responseContinuation]
@@ -24,7 +24,7 @@ struct InferenceProviderCapabilityContractTests {
         let adapter = TextOnlyConversationInferenceProviderAdapter(base: base)
 
         #expect(adapter.capabilities.contains(.conversationMessages))
-        #expect(adapter.capabilities.contains(.streamingToolCalls))
+        #expect(adapter.capabilities.contains(.streamingToolCalls) == false)
         #expect(adapter.capabilities.contains(.responseContinuation))
         #expect(adapter.capabilities.contains(.nativeToolCalling) == false)
     }

@@ -28,8 +28,8 @@ import Foundation
 /// let callRequest = try MCPRequest(
 ///     method: "tools/call",
 ///     params: [
-///         "name": "calculator",
-///         "arguments": ["expression": "2 + 2"]
+///         "name": .string("calculator"),
+///         "arguments": .dictionary(["expression": .string("2 + 2")])
 ///     ]
 /// )
 ///
@@ -37,7 +37,7 @@ import Foundation
 /// let customRequest = try MCPRequest(
 ///     id: "request-001",
 ///     method: "resources/read",
-///     params: ["uri": "file:///example.txt"]
+///     params: ["uri": .string("file:///example.txt")]
 /// )
 /// ```
 package struct MCPRequest: Sendable, Codable, Equatable {

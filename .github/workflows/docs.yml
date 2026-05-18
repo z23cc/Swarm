@@ -1,9 +1,14 @@
 name: Deploy Docs
 
 on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/docs.yml"
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -33,7 +38,7 @@ jobs:
           path: docs/.vitepress/dist
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     environment:

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SwarmCapabilityShowcaseSupport
 
@@ -71,5 +72,38 @@ struct CapabilityShowcaseTests {
         #expect(summary.contains("mcp"))
         #expect(summary.contains("passed"))
         #expect(summary.contains("skipped"))
+    }
+
+    @Test("guide scenario tables match registry")
+    func guideScenarioTablesMatchRegistry() throws {
+        let guide = try String(contentsOf: repoRoot.appendingPathComponent("docs/guide/capability-showcase.md"), encoding: .utf8)
+        let showcase = CapabilityShowcase()
+
+        let deterministicIDs = Set(showcase.scenarios.filter { $0.kind == .deterministic }.map(\.id))
+        let smokeIDs = Set(showcase.scenarios.filter { $0.kind == .smoke }.map(\.id))
+
+        for id in deterministicIDs.union(smokeIDs) {
+            #expect(guide.contains("| `\(id)` |"), "capability showcase guide should document scenario \(id)")
+        }
+
+        let documentedIDs = Set(
+            guide
+                .split(separator: "\n")
+                .compactMap { line -> String? in
+                    guard line.hasPrefix("| `") else { return nil }
+                    let parts = line.split(separator: "`")
+                    guard parts.count >= 2 else { return nil }
+                    return String(parts[1])
+                }
+        )
+
+        #expect(documentedIDs == deterministicIDs.union(smokeIDs))
+    }
+
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
 }

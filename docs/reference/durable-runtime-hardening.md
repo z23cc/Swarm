@@ -1,5 +1,7 @@
 # Durable Runtime Non-Fork Hardening Contract
 
+> **Internal note:** This document describes package-internal durable graph runtime contracts. It is not public API documentation and is excluded from the public website build.
+
 This document defines the internal runtime hardening surface for Swarm's durable graph runtime without native fork support.
 
 ## Event Schema Version
@@ -11,9 +13,7 @@ This document defines the internal runtime hardening surface for Swarm's durable
 
 ### Validation
 
-```swift
-public func validateRunOptions(_ options: InternalRunOptions) throws
-```
+Validation is performed by the internal graph runtime before dispatching a run.
 
 Throws typed runtime errors:
 
@@ -24,17 +24,7 @@ Throws typed runtime errors:
 
 ### External Writes
 
-```swift
-public struct ExternalWriteRequest: Sendable {
-    public var threadID: InternalThreadID
-    public var writes: [AnyInternalWrite]
-    public var options: InternalRunOptions
-}
-
-public func applyExternalWrites(
-    _ request: ExternalWriteRequest
-) async throws -> InternalRunHandle
-```
+The internal `ExternalWriteRequest` value carries a Hive thread ID, channel writes, and run options. Runtime code applies it through the internal run-control path.
 
 Validation and failure semantics:
 
@@ -59,25 +49,14 @@ Commit semantics are all-or-nothing: no runtime state publish occurs when valida
 ## Checkpoint Capability Contract
 
 ```swift
-public enum CheckpointQueryCapability: Sendable, Equatable {
+enum HiveCheckpointQueryCapability: Sendable, Equatable {
     case unavailable
     case latestOnly
     case queryable
 }
 
-public func checkpointQueryCapability(
-    probeThreadID: InternalThreadID = InternalThreadID("__checkpoint_capability_probe__")
-) async -> CheckpointQueryCapability
-
-public func getCheckpointHistory(
-    threadID: InternalThreadID,
-    limit: Int? = nil
-) async throws -> [CheckpointSummary]
-
-public func getCheckpoint(
-    threadID: InternalThreadID,
-    id: CheckpointID
-) async throws -> InternalCheckpoint?
+// Internal run-control helpers expose latest-checkpoint and history queries
+// where the configured checkpoint store supports them.
 ```
 
 Unsupported query operations remain explicitly typed:

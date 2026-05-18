@@ -272,6 +272,58 @@ struct AgentWorkspaceTests {
         #expect(prompt?.contains("refund window") == true)
     }
 
+    @Test("Workspace agents keep isolated default memory inside the workspace cache")
+    func workspaceAgentsKeepIsolatedDefaultMemoryInsideWorkspaceCache() async throws {
+        let workspaceRoot = try makeWorkspaceRoot()
+        defer { try? FileManager.default.removeItem(at: workspaceRoot) }
+        try writeFile(at: workspaceRoot.appendingPathComponent("AGENTS.md"), contents: "Global workspace rule.")
+        try writeFile(
+            at: workspaceRoot.appendingPathComponent(".swarm/agents/support.md"),
+            contents: """
+            ---
+            schema_version: 1
+            id: support
+            title: Support
+            skills: []
+            revision: 1
+            updated_at: 2026-05-18T00:00:00Z
+            ---
+            You are the support agent.
+            """
+        )
+
+        let cacheRoot = workspaceRoot.appendingPathComponent("Cache", isDirectory: true)
+        let workspace = try AgentWorkspace(
+            bundleRoot: workspaceRoot,
+            writableRoot: workspaceRoot.appendingPathComponent("Writable", isDirectory: true),
+            indexCacheRoot: cacheRoot
+        )
+        let onDeviceAgent = try Agent.onDevice(
+            "Local helper.",
+            workspace: workspace,
+            configuration: AgentConfiguration(name: "local", defaultTracingEnabled: false),
+            inferenceProvider: MockInferenceProvider(responses: ["local"])
+        )
+        let agent = try Agent.spec(
+            "support",
+            in: workspace,
+            configuration: AgentConfiguration(name: "support", defaultTracingEnabled: false),
+            inferenceProvider: MockInferenceProvider(responses: ["ok"])
+        )
+
+        _ = try await onDeviceAgent.run("hello")
+        _ = try await agent.run("hello")
+
+        let onDeviceWaxStore = cacheRoot
+            .appendingPathComponent("default-agent-memory/on-device", isDirectory: true)
+            .appendingPathComponent("wax-memory.mv2s")
+        let specWaxStore = cacheRoot
+            .appendingPathComponent("default-agent-memory/support", isDirectory: true)
+            .appendingPathComponent("wax-memory.mv2s")
+        #expect(FileManager.default.fileExists(atPath: onDeviceWaxStore.path))
+        #expect(FileManager.default.fileExists(atPath: specWaxStore.path))
+    }
+
     @Test("Agent.spec unions constrained tool allowlists across skills")
     func agentSpecUnionsConstrainedToolAllowlists() throws {
         let workspaceRoot = try makeWorkspaceRoot()

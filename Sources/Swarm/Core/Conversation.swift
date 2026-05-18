@@ -324,7 +324,7 @@ public actor Conversation {
     ///         print(token, terminator: "")
     ///     case .lifecycle(.completed(let result)):
     ///         print("\nCompleted with: \(result.output)")
-    ///     case .error(let error):
+    ///     case .lifecycle(.failed(let error)):
     ///         print("Error: \(error)")
     ///     default:
     ///         break
