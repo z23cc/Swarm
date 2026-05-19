@@ -56,63 +56,7 @@ let result = try await agent.run("What is AAPL trading at?")
 print(result.output) // "Apple (AAPL) is currently trading at $182.50."
 ```
 
-That is a working agent with type-safe tool calling. The rest of this README covers workflows, memory, guardrails, and the surrounding runtime pieces.
-
-## On-Device Workspace
-
-Swarm now supports a file-backed on-device workspace with:
-
-- `AGENTS.md` for workspace-wide instructions
-- `.swarm/agents/<id>.md` for per-agent specs
-- standard `.swarm/skills/<name>/SKILL.md` folders for reusable skills
-- `.swarm/memory/` for durable writable notes
-
-Code-first setup:
-
-```swift
-let workspace = try AgentWorkspace.appDefault()
-
-let agent = try Agent.onDevice(
-    "You are a concise local assistant.",
-    workspace: workspace,
-    inferenceProvider: .foundationModels()
-)
-```
-
-> **Note**: `.foundationModels()` requires an Apple platform (macOS 26+ / iOS 26+ / tvOS 26+). On Linux, swap it for `.ollama("llama3.2")`, `.anthropic(key: "...")`, or any other provider — the rest of the framework is portable.
-
-Markdown-first setup:
-
-```swift
-let workspace = try AgentWorkspace.appDefault()
-
-let agent = try Agent.spec(
-    "support",
-    in: workspace,
-    inferenceProvider: .foundationModels()
-)
-```
-
-Workspace layout:
-
-```text
-AgentWorkspace/
-  AGENTS.md
-  .swarm/
-    agents/
-      support.md
-    skills/
-      refund-policy/
-        SKILL.md
-    memory/
-      facts/
-      decisions/
-      tasks/
-      lessons/
-      handoffs/
-```
-
-Use `try await workspace.validate()` in development or CI to catch malformed specs and skills before runtime.
+That is a working agent with type-safe tool calling. Swarm also supports **AGENTS.md** and **SKILL.md** for declarative agent specs and reusable skills — see the [Getting Started guide](docs/guide/getting-started.md) for the full workspace layout.
 
 ## Why Swarm
 
