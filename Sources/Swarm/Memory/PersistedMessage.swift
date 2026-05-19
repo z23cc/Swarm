@@ -42,7 +42,7 @@
         var metadataJSON: String
 
         /// Conversation/session identifier for grouping messages.
-        @Attribute(.spotlight) var conversationId: String
+        var conversationId: String
 
         /// Creates a new persisted message.
         init(

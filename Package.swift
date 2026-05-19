@@ -29,19 +29,20 @@ var packageDependencies: [Package.Dependency] = [
     // IDESwiftPackageEnablePrebuilts=NO, SWIFTPM_DISABLE_PREBUILTS=1 and
     // -skipMacroValidation all fail to suppress it). Widening the range here lets
     // SwiftPM resolve to 601+ on Swift 6.2 toolchains, which does not ship the
-    // broken prebuilt.
+    // broken prebuilt. Keep the upper bound below 603 while Conduit 0.3.x is
+    // the latest compatible release line used by Swarm and Membrane.
     .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"603.0.0"),
-    .package(url: "https://github.com/apple/swift-log.git", from: "1.10.1"),
-    .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
-    .package(url: "https://github.com/open-telemetry/opentelemetry-swift-core.git", from: "2.3.0"),
-    .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.13.2"),
+    .package(url: "https://github.com/apple/swift-log.git", from: "1.12.0"),
+    .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.1"),
+    .package(url: "https://github.com/open-telemetry/opentelemetry-swift-core.git", from: "2.4.1"),
+    .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.13.5"),
 ]
 
 let integrationTrait = "Integrations"
 if !coreOnly {
     packageDependencies += [
         // Production graph must resolve to the published tag set that is known to build together.
-        .package(url: "https://github.com/christopherkarani/Wax.git", exact: "0.1.20"),
+        .package(url: "https://github.com/christopherkarani/Wax.git", exact: "0.1.23"),
         .package(
             url: "https://github.com/christopherkarani/Conduit",
             exact: "0.3.16",
