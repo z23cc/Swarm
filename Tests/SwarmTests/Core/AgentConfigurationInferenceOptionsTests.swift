@@ -85,11 +85,11 @@ struct AgentConfigurationInferenceOptionsTests {
         // Regression for PR #83 Codex feedback: callers need a way to
         // explicitly disable reasoning when the base/provider config has
         // it on. `nil` means "preserve base"; `.none` means "off".
-        let reasoning = ReasoningConfig(effort: .none)
+        let reasoning = ReasoningConfig(effort: ReasoningEffort.none)
         let settings = ModelSettings().reasoning(reasoning)
         let config = AgentConfiguration.default.modelSettings(settings)
 
-        #expect(config.inferenceOptions.reasoning?.effort == .none)
+        #expect(config.inferenceOptions.reasoning?.effort == ReasoningEffort.none)
         #expect(ReasoningEffort.none.rawValue == "none",
                 "raw value must match Conduit's ReasoningEffort.none for the bridge to round-trip")
     }

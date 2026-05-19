@@ -921,20 +921,30 @@ private func runLiveProviderSmokeScenario(
         )
     }
 
-    let provider = LLM.ollama(model)
-    let agent = try Agent("Reply with the single word ok.", memory: makeScenarioMemory(), inferenceProvider: provider)
-    let result = try await agent.run("Say ok.")
-    let artifact = try context.writeArtifact(named: "live-provider-smoke.txt", contents: result.output)
-    return .init(
-        id: "live-provider-smoke",
-        name: "Live Provider Smoke",
-        families: [.providers],
-        status: .passed,
-        summary: "Ran a live Ollama-backed smoke check.",
-        evidence: [
-            .init(label: "live-output", detail: result.output, artifactPath: context.relativeArtifactPath(for: artifact)),
-        ]
-    )
+    #if SWARM_INTEGRATIONS
+        let provider = LLM.ollama(model)
+        let agent = try Agent("Reply with the single word ok.", memory: makeScenarioMemory(), inferenceProvider: provider)
+        let result = try await agent.run("Say ok.")
+        let artifact = try context.writeArtifact(named: "live-provider-smoke.txt", contents: result.output)
+        return .init(
+            id: "live-provider-smoke",
+            name: "Live Provider Smoke",
+            families: [.providers],
+            status: .passed,
+            summary: "Ran a live Ollama-backed smoke check.",
+            evidence: [
+                .init(label: "live-output", detail: result.output, artifactPath: context.relativeArtifactPath(for: artifact)),
+            ]
+        )
+    #else
+        return .init(
+            id: "live-provider-smoke",
+            name: "Live Provider Smoke",
+            families: [.providers],
+            status: .skipped,
+            summary: "Live provider smoke requires the Integrations trait."
+        )
+    #endif
 }
 
 // MARK: - Fixtures
