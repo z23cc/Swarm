@@ -20,6 +20,7 @@ coverage/
 .claude/
 .mcp.json
 .agent_context.md
+AGENTS.md
 
 # Internal development artifacts
 IMPLEMENTATION_PLAN.md
@@ -53,6 +54,10 @@ website/
 
 # Git worktrees
 .worktrees/
+
+# Internal test planning artifacts
+Tests/**/INTEGRATION_TEST_SUMMARY.md
+Tests/**/QUICK_REFERENCE.md
 
 # API audit working documents
 docs/reference/api-surface-catalog.md
