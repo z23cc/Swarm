@@ -179,10 +179,7 @@ var packageTargets: [Target] = [
             }
             return dependencies
         }(),
-        resources: [
-            .copy("Guardrails/INTEGRATION_TEST_SUMMARY.md"),
-            .copy("Guardrails/QUICK_REFERENCE.md")
-        ],
+        resources: [],
         swiftSettings: swarmSwiftSettings
     ),
     .testTarget(

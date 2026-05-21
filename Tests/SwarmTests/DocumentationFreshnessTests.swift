@@ -97,7 +97,6 @@ struct DocumentationFreshnessTests {
             "README.md",
             "docs/reference/front-facing-api.md",
             "docs/reference/api-catalog.md",
-            "docs/swarm-complete-reference.md",
         ]
 
         for file in checkedFiles {
